@@ -9,6 +9,7 @@ import { getInsights, type Insight } from "@/modules/insights/api";
 import { SummaryCard } from "@/modules/dashboard/SummaryCard";
 import { CashFlowChart } from "@/modules/dashboard/CashFlowChart";
 import { CategoryBreakdown } from "@/modules/dashboard/CategoryBreakdown";
+import { CreditCardSection } from "@/modules/dashboard/CreditCardSection";
 import { InsightsSection } from "@/modules/insights/InsightsSection";
 import { Skeleton } from "@/components/shared/Skeleton";
 
@@ -84,6 +85,8 @@ export function DashboardPage() {
           />
         </div>
       )}
+
+      <CreditCardSection />
 
       {isLoading ? (
         <Skeleton className="h-72" />

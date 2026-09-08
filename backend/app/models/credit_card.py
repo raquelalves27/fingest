@@ -69,6 +69,17 @@ class CreditCardPurchase(Base, UUIDPKMixin, TimestampMixin, SoftDeleteMixin):
     purchase_date = Column(Date, nullable=False)
     installments_count = Column(Integer, nullable=False, default=1)
     status = Column(Enum(PurchaseStatus), nullable=False, default=PurchaseStatus.active)
+    # --- Recorrência (ex: assinatura da Netflix) ---
+    # Uma compra recorrente funciona como um "template": total_amount passa a
+    # ser o valor mensal e a compra acumula uma parcela por mês, cada uma na
+    # fatura correta. A materialização é lazy (purchase_service
+    # .generate_due_recurring_purchases), chamada ao listar as compras — não há
+    # scheduler nesta arquitetura. recurring_active=False pausa sem apagar o
+    # histórico já lançado.
+    is_recurring = Column(Boolean, nullable=False, default=False)
+    recurring_active = Column(Boolean, nullable=False, default=True)
+    recurring_day = Column(Integer, nullable=True)  # dia do mês em que repete (1-31)
+    recurring_next_date = Column(Date, nullable=True)  # próximo mês ainda não lançado
 
     credit_card = relationship("CreditCard", back_populates="purchases")
     installments = relationship(

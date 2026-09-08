@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Plus, CreditCard as CardIcon, Receipt } from "lucide-react";
 import { listCreditCards, type CreditCard } from "@/modules/cards/api";
-import { listPurchases, cancelPurchase, type Purchase } from "@/modules/purchases/api";
+import { listPurchases, cancelPurchase, updatePurchase, type Purchase } from "@/modules/purchases/api";
 import { listInvoices, invoiceLabel, invoiceStatusLabels, type Invoice } from "@/modules/invoices/api";
 import { listAccounts, type Account } from "@/modules/accounts/api";
 import { CreateCardModal } from "@/modules/cards/CreateCardModal";
@@ -21,6 +21,7 @@ export function CardsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [showCardModal, setShowCardModal] = useState(false);
   const [showPurchaseModal, setShowPurchaseModal] = useState(false);
+  const [editingPurchase, setEditingPurchase] = useState<Purchase | null>(null);
   const [payingInvoice, setPayingInvoice] = useState<Invoice | null>(null);
   const { message, showToast } = useToast();
 
@@ -65,6 +66,13 @@ export function CardsPage() {
   async function handleCancelPurchase(id: string) {
     await cancelPurchase(id);
     showToast("Compra cancelada.");
+    if (selectedCardId) loadCardDetails(selectedCardId);
+    loadAll();
+  }
+
+  async function handleToggleRecurring(p: Purchase) {
+    await updatePurchase(p.id, { recurring_active: !p.recurring_active });
+    showToast(p.recurring_active ? "Recorrência pausada." : "Recorrência reativada.");
     if (selectedCardId) loadCardDetails(selectedCardId);
     loadAll();
   }
@@ -182,24 +190,58 @@ export function CardsPage() {
                     {purchases.map((p) => (
                       <div key={p.id} className="flex items-center justify-between py-3 group">
                         <div>
-                          <p className="text-sm font-medium text-ink dark:text-paper">{p.description}</p>
+                          <p className="text-sm font-medium text-ink dark:text-paper flex items-center gap-2">
+                            {p.description}
+                            {p.is_recurring && (
+                              <span
+                                className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${
+                                  p.recurring_active
+                                    ? "bg-clay/10 text-clay"
+                                    : "bg-olive/10 text-olive"
+                                }`}
+                              >
+                                {p.recurring_active ? "recorrente" : "pausada"}
+                              </span>
+                            )}
+                          </p>
                           <p className="text-xs text-olive">
                             {formatDate(p.purchase_date)}
-                            {p.installments_count > 1 ? ` · ${p.installments_count}x` : " · à vista"}
+                            {p.is_recurring
+                              ? ` · todo dia ${p.recurring_day} · ${p.installments_count} lançada(s)`
+                              : p.installments_count > 1
+                              ? ` · ${p.installments_count}x`
+                              : " · à vista"}
                             {p.status === "cancelled" ? " · cancelada" : ""}
                           </p>
                         </div>
                         <div className="flex items-center gap-3">
                           <span className="num text-sm font-medium text-ink dark:text-paper">
                             {formatCurrency(p.total_amount)}
+                            {p.is_recurring ? "/mês" : ""}
                           </span>
                           {p.status === "active" && (
-                            <button
-                              onClick={() => handleCancelPurchase(p.id)}
-                              className="opacity-0 group-hover:opacity-100 text-xs text-clay hover:underline transition"
-                            >
-                              Cancelar
-                            </button>
+                            <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition">
+                              <button
+                                onClick={() => setEditingPurchase(p)}
+                                className="text-xs text-olive hover:text-ink dark:hover:text-paper hover:underline"
+                              >
+                                Editar
+                              </button>
+                              {p.is_recurring && (
+                                <button
+                                  onClick={() => handleToggleRecurring(p)}
+                                  className="text-xs text-olive hover:underline"
+                                >
+                                  {p.recurring_active ? "Pausar" : "Reativar"}
+                                </button>
+                              )}
+                              <button
+                                onClick={() => handleCancelPurchase(p.id)}
+                                className="text-xs text-clay hover:underline"
+                              >
+                                Cancelar
+                              </button>
+                            </div>
                           )}
                         </div>
                       </div>
@@ -232,6 +274,20 @@ export function CardsPage() {
             loadCardDetails(selectedCard.id);
             loadAll();
             showToast("Compra adicionada com sucesso.");
+          }}
+        />
+      )}
+
+      {editingPurchase && selectedCard && (
+        <CreatePurchaseModal
+          card={selectedCard}
+          purchase={editingPurchase}
+          onClose={() => setEditingPurchase(null)}
+          onCreated={() => {
+            setEditingPurchase(null);
+            loadCardDetails(selectedCard.id);
+            loadAll();
+            showToast("Lançamento atualizado.");
           }}
         />
       )}

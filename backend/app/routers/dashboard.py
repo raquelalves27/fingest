@@ -4,8 +4,12 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.user import User
-from app.schemas.dashboard import DashboardSummary, CashFlowResponse, CategoryBreakdownResponse
-from app.services import dashboard_service, recurring_service
+from app.schemas.dashboard import (
+    CashFlowResponse, CategoryBreakdownResponse, CreditCardDashboardResponse, DashboardSummary,
+)
+from app.services import (
+    credit_card_dashboard_service, dashboard_service, purchase_service, recurring_service,
+)
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
@@ -33,3 +37,18 @@ def cash_flow(
 def category_breakdown(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     items = dashboard_service.get_category_breakdown(db, current_user.id)
     return {"items": items}
+
+
+@router.get("/credit-cards", response_model=CreditCardDashboardResponse)
+def credit_cards(
+    scope: str = Query(default="current", pattern="^(current|open)$"),
+    months: int = Query(default=6, ge=3, le=24),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    # Materializa parcelas de compras recorrentes vencidas antes de calcular o
+    # painel, para que a fatura/limite reflitam as assinaturas já devidas.
+    purchase_service.generate_due_recurring_purchases(db, current_user.id)
+    return credit_card_dashboard_service.get_credit_card_dashboard(
+        db, current_user.id, scope=scope, months=months
+    )
