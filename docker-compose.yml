@@ -1,0 +1,72 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: fingest-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-fingest}
+      MYSQL_USER: ${MYSQL_USER:-fingest}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-fingest}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_change_me}
+    volumes:
+      - fingest_mysql_data:/var/lib/mysql
+    # Porta do MySQL NÃO é exposta ao host por padrão — evita conflito com um
+    # MySQL já instalado na sua máquina (XAMPP, WAMP, serviço local, etc).
+    # O backend acessa o MySQL normalmente pela rede interna do Docker
+    # (mysql:3306), então isso não afeta o funcionamento do sistema.
+    # Se quiser conectar com DBeaver/MySQL Workbench a partir do host, descomente
+    # a linha abaixo e troque 3307 por uma porta livre na sua máquina:
+    # ports:
+    #   - "127.0.0.1:3307:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-root_change_me}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - fingest_network
+
+  backend:
+    build:
+      context: ./backend
+    container_name: fingest-backend
+    restart: unless-stopped
+    environment:
+      # IMPORTANTE: se MYSQL_PASSWORD tiver caracteres especiais (@ : / # espaço
+      # etc.), defina MYSQL_PASSWORD_URLENC no .env com a versão URL-encoded
+      # dela (ex: @ vira %40) — veja o .env.example para detalhes e exemplos.
+      DATABASE_URL: mysql+pymysql://${MYSQL_USER:-fingest}:${MYSQL_PASSWORD_URLENC:-fingest}@mysql:3306/${MYSQL_DATABASE:-fingest}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?defina JWT_SECRET_KEY no .env}
+      JWT_ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: 1440
+      REFRESH_TOKEN_EXPIRE_DAYS: 30
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+      TIMEZONE: America/Fortaleza
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
+    networks:
+      - fingest_network
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: ${VITE_API_URL:-/api}
+    container_name: fingest-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"
+    networks:
+      - fingest_network
+
+networks:
+  fingest_network:
+    driver: bridge
+
+volumes:
+  fingest_mysql_data:
