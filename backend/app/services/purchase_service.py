@@ -43,7 +43,10 @@ def list_purchases(db: Session, user_id: str, credit_card_id: str | None = None)
     )
     if credit_card_id:
         query = query.filter(CreditCardPurchase.credit_card_id == credit_card_id)
-    return query.order_by(CreditCardPurchase.purchase_date.desc()).all()
+    # Ordem de lançamento (quando foi cadastrada no sistema) — não pela data
+    # da compra, que o usuário pode escolher livremente e não reflete a
+    # sequência real em que os lançamentos foram feitos.
+    return query.order_by(CreditCardPurchase.created_at.desc()).all()
 
 
 def get_purchase(db: Session, user_id: str, purchase_id: str) -> CreditCardPurchase:
