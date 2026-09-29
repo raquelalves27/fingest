@@ -126,24 +126,25 @@ def _build_cards(db: Session, user_id: str, today: date):
     used_by_card = _used_limit_by_card(db, user_id)
     recurring_by_card = _recurring_monthly_by_card(db, user_id)
 
-    open_invoices = (
+    # Traz TODAS as faturas (inclusive já pagas) — precisamos da linha do tempo
+    # completa pra achar a do mês corrente e, se ela já estiver paga, saber
+    # qual é a próxima.
+    all_invoices = (
         db.query(CreditCardInvoice)
         .join(CreditCard, CreditCard.id == CreditCardInvoice.credit_card_id)
-        .filter(
-            CreditCard.user_id == user_id,
-            CreditCard.deleted_at.is_(None),
-            CreditCardInvoice.status != InvoiceStatus.paid,
-        )
+        .filter(CreditCard.user_id == user_id, CreditCard.deleted_at.is_(None))
         .all()
     )
     invoices_by_card: dict[str, list[CreditCardInvoice]] = {}
-    for inv in open_invoices:
+    for inv in all_invoices:
         invoices_by_card.setdefault(inv.credit_card_id, []).append(inv)
     for lst in invoices_by_card.values():
         lst.sort(key=lambda i: (i.reference_year, i.reference_month))
 
+    today_key = (today.year, today.month)
     panels = []
     current_invoice_ids: list[str] = []
+    overdue_invoices: list[dict] = []
     for card in cards:
         credit_limit = Decimal(card.credit_limit or 0)
         used = used_by_card.get(card.id, Decimal("0"))
@@ -151,8 +152,33 @@ def _build_cards(db: Session, user_id: str, today: date):
         utilization = _pct(used, credit_limit)
 
         card_invoices = invoices_by_card.get(card.id, [])
-        current = card_invoices[0] if card_invoices else None
-        nxt = card_invoices[1] if len(card_invoices) > 1 else None
+
+        # "Atual" é sempre a fatura do mês corrente. Se ela já foi paga (o
+        # usuário adiantou o pagamento), a próxima já assume o posto.
+        current = next(
+            (i for i in card_invoices if (i.reference_year, i.reference_month) == today_key), None
+        )
+        if current is not None and current.status == InvoiceStatus.paid:
+            idx = card_invoices.index(current)
+            current = card_invoices[idx + 1] if idx + 1 < len(card_invoices) else None
+        if current is None:
+            # Cartão sem fatura gerada pro mês atual ainda (nenhuma compra
+            # lançada este mês) — cai pra mais antiga em aberto, se houver.
+            current = next((i for i in card_invoices if i.status != InvoiceStatus.paid), None)
+
+        idx = card_invoices.index(current) if current else -1
+        nxt = card_invoices[idx + 1] if idx >= 0 and idx + 1 < len(card_invoices) else None
+
+        # Faturas vencidas, não pagas, que não são a atual: atraso real que
+        # não pode ficar escondido só porque o mês virou.
+        for inv in card_invoices:
+            if inv.status != InvoiceStatus.paid and inv.due_date < today and (current is None or inv.id != current.id):
+                overdue_invoices.append({
+                    "card_name": card.name,
+                    "label": _invoice_label(inv.reference_month, inv.reference_year),
+                    "total": inv_totals.get(inv.id, Decimal("0")),
+                    "days_overdue": (today - inv.due_date).days,
+                })
 
         current_brief = None
         days_until_due = None
@@ -189,7 +215,7 @@ def _build_cards(db: Session, user_id: str, today: date):
             "health": _card_health(utilization, days_until_due, current is not None),
         })
 
-    return panels, current_invoice_ids
+    return panels, current_invoice_ids, overdue_invoices
 
 
 def _scope_invoice_ids(db: Session, user_id: str, scope: str, current_invoice_ids: list[str]) -> list[str]:
@@ -356,8 +382,17 @@ def _trend(db: Session, user_id: str, months: int, today: date):
     return points
 
 
-def _insights(panels: list[dict], totals: dict, breakdown: list[dict]) -> list[dict]:
+def _insights(
+    panels: list[dict], totals: dict, breakdown: list[dict], overdue_invoices: list[dict]
+) -> list[dict]:
     out: list[dict] = []
+
+    for od in overdue_invoices:
+        out.append({
+            "level": "critical",
+            "text": f"A fatura de {od['label']} do {od['card_name']} ({_fmt(od['total'])}) está "
+                    f"atrasada há {od['days_overdue']} dia(s) e ainda não foi paga.",
+        })
 
     for p in panels:
         u = p["utilization_pct"]
@@ -420,7 +455,7 @@ def get_credit_card_dashboard(
 ) -> dict:
     today = date.today()
 
-    panels, current_invoice_ids = _build_cards(db, user_id, today)
+    panels, current_invoice_ids, overdue_invoices = _build_cards(db, user_id, today)
 
     credit_limit_total = sum((p["credit_limit"] for p in panels), Decimal("0"))
     used_limit_total = sum((p["used_limit"] for p in panels), Decimal("0"))
@@ -460,5 +495,5 @@ def get_credit_card_dashboard(
         "cards": panels,
         "category_breakdown": breakdown,
         "trend": trend,
-        "insights": _insights(panels, totals, breakdown),
+        "insights": _insights(panels, totals, breakdown, overdue_invoices),
     }

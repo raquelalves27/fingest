@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Plus, CreditCard as CardIcon, Receipt } from "lucide-react";
+import { Plus, Pencil, CreditCard as CardIcon, Receipt } from "lucide-react";
 import { listCreditCards, type CreditCard } from "@/modules/cards/api";
 import { listPurchases, cancelPurchase, updatePurchase, type Purchase } from "@/modules/purchases/api";
 import { listInvoices, invoiceLabel, invoiceStatusLabels, type Invoice } from "@/modules/invoices/api";
@@ -20,6 +20,7 @@ export function CardsPage() {
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [showCardModal, setShowCardModal] = useState(false);
+  const [editingCard, setEditingCard] = useState<CreditCard | null>(null);
   const [showPurchaseModal, setShowPurchaseModal] = useState(false);
   const [editingPurchase, setEditingPurchase] = useState<Purchase | null>(null);
   const [payingInvoice, setPayingInvoice] = useState<Invoice | null>(null);
@@ -151,7 +152,16 @@ export function CardsPage() {
           {selectedCard && (
             <>
               <div className="flex items-center justify-between">
-                <h3 className="font-display text-xl text-ink dark:text-paper">{selectedCard.name}</h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-display text-xl text-ink dark:text-paper">{selectedCard.name}</h3>
+                  <button
+                    onClick={() => setEditingCard(selectedCard)}
+                    title="Editar cartão"
+                    className="text-olive hover:text-ink dark:hover:text-paper transition"
+                  >
+                    <Pencil size={16} />
+                  </button>
+                </div>
                 <button
                   onClick={() => setShowPurchaseModal(true)}
                   className="flex items-center gap-2 rounded-card bg-clay hover:bg-clay-soft text-white text-sm font-medium px-4 py-2.5 transition"
@@ -289,10 +299,23 @@ export function CardsPage() {
       {showCardModal && (
         <CreateCardModal
           onClose={() => setShowCardModal(false)}
-          onCreated={(card) => {
+          onSaved={(card) => {
             setCards((prev) => [...prev, card]);
             setSelectedCardId(card.id);
             setShowCardModal(false);
+            showToast("Cartão criado com sucesso.");
+          }}
+        />
+      )}
+
+      {editingCard && (
+        <CreateCardModal
+          card={editingCard}
+          onClose={() => setEditingCard(null)}
+          onSaved={(card) => {
+            setCards((prev) => prev.map((c) => (c.id === card.id ? card : c)));
+            setEditingCard(null);
+            showToast("Cartão atualizado com sucesso.");
           }}
         />
       )}

@@ -1,19 +1,21 @@
 import { useState, type FormEvent } from "react";
 import { X } from "lucide-react";
-import { createCreditCard, type CreditCard } from "@/modules/cards/api";
+import { createCreditCard, updateCreditCard, type CreditCard } from "@/modules/cards/api";
 
 interface Props {
+  card?: CreditCard;
   onClose: () => void;
-  onCreated: (card: CreditCard) => void;
+  onSaved: (card: CreditCard) => void;
 }
 
-export function CreateCardModal({ onClose, onCreated }: Props) {
-  const [name, setName] = useState("");
-  const [brand, setBrand] = useState("");
-  const [creditLimit, setCreditLimit] = useState("");
-  const [closingDay, setClosingDay] = useState("10");
-  const [dueDay, setDueDay] = useState("17");
-  const [lastFour, setLastFour] = useState("");
+export function CreateCardModal({ card, onClose, onSaved }: Props) {
+  const isEditing = !!card;
+  const [name, setName] = useState(card?.name ?? "");
+  const [brand, setBrand] = useState(card?.brand ?? "");
+  const [creditLimit, setCreditLimit] = useState(card?.credit_limit ?? "");
+  const [closingDay, setClosingDay] = useState(String(card?.closing_day ?? 10));
+  const [dueDay, setDueDay] = useState(String(card?.due_day ?? 17));
+  const [lastFour, setLastFour] = useState(card?.last_four_digits ?? "");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -23,17 +25,25 @@ export function CreateCardModal({ onClose, onCreated }: Props) {
     setIsSubmitting(true);
     try {
       const normalizedLimit = creditLimit.replace(/\./g, "").replace(",", ".");
-      const card = await createCreditCard({
-        name,
-        brand: brand || undefined,
-        credit_limit: normalizedLimit,
-        closing_day: parseInt(closingDay, 10),
-        due_day: parseInt(dueDay, 10),
-        last_four_digits: lastFour || undefined,
-      });
-      onCreated(card);
+      const saved = isEditing
+        ? await updateCreditCard(card!.id, {
+            name,
+            brand: brand || undefined,
+            credit_limit: normalizedLimit,
+            closing_day: parseInt(closingDay, 10),
+            due_day: parseInt(dueDay, 10),
+          })
+        : await createCreditCard({
+            name,
+            brand: brand || undefined,
+            credit_limit: normalizedLimit,
+            closing_day: parseInt(closingDay, 10),
+            due_day: parseInt(dueDay, 10),
+            last_four_digits: lastFour || undefined,
+          });
+      onSaved(saved);
     } catch (err: any) {
-      setError(err.response?.data?.detail || "Não foi possível criar o cartão.");
+      setError(err.response?.data?.detail || `Não foi possível ${isEditing ? "salvar" : "criar"} o cartão.`);
     } finally {
       setIsSubmitting(false);
     }
@@ -43,7 +53,9 @@ export function CreateCardModal({ onClose, onCreated }: Props) {
     <div className="fixed inset-0 z-20 flex items-end md:items-center justify-center bg-ink/40 backdrop-blur-sm">
       <div className="w-full md:max-w-md rounded-t-card md:rounded-card bg-paper-soft dark:bg-ink-soft border border-paper-border dark:border-ink-border p-6 shadow-soft max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-5">
-          <h3 className="font-display text-xl text-ink dark:text-paper">Novo cartão</h3>
+          <h3 className="font-display text-xl text-ink dark:text-paper">
+            {isEditing ? "Editar cartão" : "Novo cartão"}
+          </h3>
           <button onClick={onClose} className="text-olive hover:text-ink dark:hover:text-paper">
             <X size={20} />
           </button>
@@ -75,11 +87,15 @@ export function CreateCardModal({ onClose, onCreated }: Props) {
               <label className="block text-sm font-medium text-ink dark:text-paper mb-1.5">Últimos 4 dígitos</label>
               <input
                 value={lastFour}
+                disabled={isEditing}
                 onChange={(e) => setLastFour(e.target.value.replace(/\D/g, "").slice(0, 4))}
                 placeholder="1234"
                 inputMode="numeric"
-                className="w-full rounded-card border border-paper-border dark:border-ink-border bg-paper dark:bg-ink px-4 py-2.5 outline-none focus:ring-2 focus:ring-emerald transition"
+                className="w-full rounded-card border border-paper-border dark:border-ink-border bg-paper dark:bg-ink px-4 py-2.5 outline-none focus:ring-2 focus:ring-emerald transition disabled:opacity-50"
               />
+              {isEditing && (
+                <p className="text-xs text-olive/70 mt-1">Não pode ser alterado depois de criado.</p>
+              )}
             </div>
           </div>
 
@@ -129,7 +145,7 @@ export function CreateCardModal({ onClose, onCreated }: Props) {
             disabled={isSubmitting}
             className="w-full rounded-card bg-emerald hover:bg-emerald-deep text-white font-medium py-2.5 transition disabled:opacity-60"
           >
-            {isSubmitting ? "Salvando…" : "Criar cartão"}
+            {isSubmitting ? "Salvando…" : isEditing ? "Salvar alterações" : "Criar cartão"}
           </button>
         </form>
       </div>
