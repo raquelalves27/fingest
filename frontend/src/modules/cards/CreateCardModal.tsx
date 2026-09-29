@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { X } from "lucide-react";
 import { createCreditCard, updateCreditCard, type CreditCard } from "@/modules/cards/api";
+import { toDecimalInput, parseDecimalInput } from "@/lib/format";
 
 interface Props {
   card?: CreditCard;
@@ -12,7 +13,7 @@ export function CreateCardModal({ card, onClose, onSaved }: Props) {
   const isEditing = !!card;
   const [name, setName] = useState(card?.name ?? "");
   const [brand, setBrand] = useState(card?.brand ?? "");
-  const [creditLimit, setCreditLimit] = useState(card?.credit_limit ?? "");
+  const [creditLimit, setCreditLimit] = useState(card ? toDecimalInput(card.credit_limit) : "");
   const [closingDay, setClosingDay] = useState(String(card?.closing_day ?? 10));
   const [dueDay, setDueDay] = useState(String(card?.due_day ?? 17));
   const [lastFour, setLastFour] = useState(card?.last_four_digits ?? "");
@@ -24,7 +25,7 @@ export function CreateCardModal({ card, onClose, onSaved }: Props) {
     setError(null);
     setIsSubmitting(true);
     try {
-      const normalizedLimit = creditLimit.replace(/\./g, "").replace(",", ".");
+      const normalizedLimit = parseDecimalInput(creditLimit);
       const saved = isEditing
         ? await updateCreditCard(card!.id, {
             name,

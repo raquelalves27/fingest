@@ -7,6 +7,7 @@ import {
 } from "@/modules/purchases/api";
 import { type CreditCard } from "@/modules/cards/api";
 import { useFormOptions } from "@/modules/transactions/useFormOptions";
+import { toDecimalInput, parseDecimalInput } from "@/lib/format";
 
 interface Props {
   card: CreditCard;
@@ -20,19 +21,13 @@ function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function amountToInput(value: string) {
-  const n = parseFloat(value);
-  if (isNaN(n)) return "";
-  return n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
 export function CreatePurchaseModal({ card, purchase, onClose, onCreated }: Props) {
   const isEdit = !!purchase;
   const { categories } = useFormOptions();
 
   const [description, setDescription] = useState(purchase?.description ?? "");
   const [totalAmount, setTotalAmount] = useState(
-    purchase ? amountToInput(purchase.total_amount) : ""
+    purchase ? toDecimalInput(purchase.total_amount) : ""
   );
   const [purchaseDate, setPurchaseDate] = useState(purchase?.purchase_date ?? todayISO());
   const [installmentsCount, setInstallmentsCount] = useState(
@@ -49,7 +44,7 @@ export function CreatePurchaseModal({ card, purchase, onClose, onCreated }: Prop
 
   const expenseCategories = categories.filter((c) => c.type === "expense" && !c.parent_id);
   const n = parseInt(installmentsCount || "1", 10);
-  const totalNum = parseFloat(totalAmount.replace(/\./g, "").replace(",", "."));
+  const totalNum = parseFloat(parseDecimalInput(totalAmount));
   const perInstallment = !isNaN(totalNum) && n > 0 ? totalNum / n : null;
 
   // Numa compra recorrente já existente, o dia de recorrência é a base da data;
@@ -68,7 +63,7 @@ export function CreatePurchaseModal({ card, purchase, onClose, onCreated }: Prop
     e.preventDefault();
     setError(null);
     setIsSubmitting(true);
-    const normalizedAmount = totalAmount.replace(/\./g, "").replace(",", ".");
+    const normalizedAmount = parseDecimalInput(totalAmount);
     try {
       if (isEdit) {
         if (purchase!.is_recurring) {
