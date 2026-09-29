@@ -7,7 +7,8 @@ from sqlalchemy.orm import Session
 
 from app.models.category import Category
 from app.models.credit_card import (
-    CreditCardInvoice, InvoiceStatus, CreditCard, CreditCardInstallment, InstallmentStatus
+    CreditCardInvoice, InvoiceStatus, CreditCard, CreditCardInstallment, InstallmentStatus,
+    CreditCardPurchase,
 )
 from app.models.transaction import Income, Expense, IncomeStatus, ExpenseStatus
 from app.services import balance_service
@@ -134,10 +135,13 @@ def get_cash_flow(db: Session, user_id: str, months: int = 6) -> list[dict]:
 
 
 def get_category_breakdown(db: Session, user_id: str) -> list[dict]:
+    """Gastos por categoria no mês atual — combina despesas avulsas e o que já
+    está na fatura do cartão (mesma janela usada em `current_invoices_total`),
+    senão categorias só existentes no cartão nunca apareceriam aqui."""
     today = date.today()
     start, end = _month_bounds(today)
 
-    rows = (
+    expense_rows = (
         db.query(
             Category.id, Category.name, Category.color,
             func.coalesce(func.sum(Expense.amount), 0).label("total"),
@@ -151,19 +155,42 @@ def get_category_breakdown(db: Session, user_id: str) -> list[dict]:
             Expense.expense_date <= end,
         )
         .group_by(Category.id, Category.name, Category.color)
-        .order_by(func.sum(Expense.amount).desc())
         .all()
     )
 
-    grand_total = sum((Decimal(r.total) for r in rows), Decimal("0"))
+    card_rows = (
+        db.query(
+            Category.id, Category.name, Category.color,
+            func.coalesce(func.sum(CreditCardInstallment.amount), 0).label("total"),
+        )
+        .select_from(CreditCardInstallment)
+        .join(CreditCardInvoice, CreditCardInvoice.id == CreditCardInstallment.invoice_id)
+        .join(CreditCard, CreditCard.id == CreditCardInvoice.credit_card_id)
+        .join(CreditCardPurchase, CreditCardPurchase.id == CreditCardInstallment.purchase_id)
+        .join(Category, Category.id == CreditCardPurchase.category_id)
+        .filter(
+            CreditCard.user_id == user_id,
+            CreditCard.deleted_at.is_(None),
+            CreditCardInvoice.status.in_([InvoiceStatus.open, InvoiceStatus.closed]),
+            CreditCardInvoice.reference_month == today.month,
+            CreditCardInvoice.reference_year == today.year,
+            CreditCardInstallment.status != InstallmentStatus.cancelled,
+        )
+        .group_by(Category.id, Category.name, Category.color)
+        .all()
+    )
+
+    totals: dict[str, dict] = {}
+    for r in (*expense_rows, *card_rows):
+        entry = totals.setdefault(
+            r.id, {"category_id": r.id, "category_name": r.name, "color": r.color, "total": Decimal("0")}
+        )
+        entry["total"] += Decimal(r.total)
+
+    grand_total = sum((e["total"] for e in totals.values()), Decimal("0"))
     items = []
-    for r in rows:
-        pct = float(Decimal(r.total) / grand_total * 100) if grand_total > 0 else 0.0
-        items.append({
-            "category_id": r.id,
-            "category_name": r.name,
-            "color": r.color,
-            "total": Decimal(r.total),
-            "percentage": round(pct, 1),
-        })
+    for entry in totals.values():
+        pct = float(entry["total"] / grand_total * 100) if grand_total > 0 else 0.0
+        items.append({**entry, "percentage": round(pct, 1)})
+    items.sort(key=lambda i: i["total"], reverse=True)
     return items
