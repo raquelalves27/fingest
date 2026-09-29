@@ -60,8 +60,33 @@ export function CardsPage() {
   const sortedInvoices = [...invoices].sort(
     (a, b) => a.reference_year - b.reference_year || a.reference_month - b.reference_month
   );
-  const currentInvoice = sortedInvoices.find((i) => i.status !== "paid");
-  const upcomingInvoices = sortedInvoices.filter((i) => i.id !== currentInvoice?.id).slice(0, 5);
+
+  function findInvoiceFor(year: number, month: number) {
+    return sortedInvoices.find((i) => i.reference_year === year && i.reference_month === month);
+  }
+
+  // A fatura "atual" é sempre a do mês corrente. Se ela já foi paga (o usuário
+  // adiantou o pagamento), mostramos direto a do mês seguinte.
+  const today = new Date();
+  let currentInvoice = findInvoiceFor(today.getFullYear(), today.getMonth() + 1);
+  if (currentInvoice?.status === "paid") {
+    const nextRef = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+    currentInvoice = findInvoiceFor(nextRef.getFullYear(), nextRef.getMonth() + 1);
+  }
+  // Fallback: se ainda não existe fatura gerada para o mês atual, cai para a
+  // primeira em aberto (evita a tela ficar sem nada em cartões muito novos).
+  if (!currentInvoice) {
+    currentInvoice = sortedInvoices.find((i) => i.status !== "paid");
+  }
+
+  const currentIndex = currentInvoice
+    ? sortedInvoices.findIndex((i) => i.id === currentInvoice!.id)
+    : -1;
+  const upcomingInvoices = currentIndex >= 0 ? sortedInvoices.slice(currentIndex + 1, currentIndex + 6) : [];
+
+  function installmentAmount(p: Purchase): number {
+    return p.installments[0] ? parseFloat(p.installments[0].amount) : parseFloat(p.total_amount) / p.installments_count;
+  }
 
   async function handleCancelPurchase(id: string) {
     await cancelPurchase(id);
@@ -215,10 +240,17 @@ export function CardsPage() {
                           </p>
                         </div>
                         <div className="flex items-center gap-3">
-                          <span className="num text-sm font-medium text-ink dark:text-paper">
-                            {formatCurrency(p.total_amount)}
-                            {p.is_recurring ? "/mês" : ""}
-                          </span>
+                          <div className="text-right">
+                            <p className="num text-sm font-medium text-ink dark:text-paper">
+                              {formatCurrency(p.total_amount)}
+                              {p.is_recurring ? "/mês" : ""}
+                            </p>
+                            {!p.is_recurring && p.installments_count > 1 && (
+                              <p className="num text-xs text-olive">
+                                {p.installments_count}x de {formatCurrency(installmentAmount(p))}
+                              </p>
+                            )}
+                          </div>
                           {p.status === "active" && (
                             <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition">
                               <button

@@ -86,18 +86,18 @@ export function DashboardPage() {
         </div>
       )}
 
+      {isLoading ? (
+        <Skeleton className="h-64" />
+      ) : (
+        <CategoryBreakdown items={breakdown} />
+      )}
+
       <CreditCardSection />
 
       {isLoading ? (
         <Skeleton className="h-72" />
       ) : (
         <CashFlowChart points={cashFlow} />
-      )}
-
-      {isLoading ? (
-        <Skeleton className="h-48" />
-      ) : (
-        <CategoryBreakdown items={breakdown} />
       )}
 
       {!isLoading && <InsightsSection insights={insights} />}
