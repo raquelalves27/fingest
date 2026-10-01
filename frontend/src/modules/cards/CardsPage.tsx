@@ -17,6 +17,20 @@ interface InvoiceLineItem {
   installment: Installment;
 }
 
+/** (ano, mês) da competência que está aberta em `ref`, pela regra de
+ * fechamento do cartão (seção 14 do escopo, mesma do backend em
+ * `invoice_service.reference_period_for`): dia <= closingDay fica no mês
+ * civil de `ref`; dia > closingDay cai no mês seguinte. Ex: fecha dia 9 —
+ * tudo lançado até dia 9 do mês em curso entra nessa competência; a partir
+ * do dia 10 já é a competência do mês seguinte. */
+function referencePeriodFor(closingDay: number, ref: Date): { year: number; month: number } {
+  const d =
+    ref.getDate() <= closingDay
+      ? new Date(ref.getFullYear(), ref.getMonth(), 1)
+      : new Date(ref.getFullYear(), ref.getMonth() + 1, 1);
+  return { year: d.getFullYear(), month: d.getMonth() + 1 };
+}
+
 function lineItemMeta(item: InvoiceLineItem): string {
   const { purchase: p, installment: inst } = item;
   const base = p.is_recurring
@@ -88,16 +102,23 @@ export function CardsPage() {
     return sortedInvoices.find((i) => i.reference_year === year && i.reference_month === month);
   }
 
-  // A fatura "atual" é sempre a do mês corrente. Se ela já foi paga (o usuário
-  // adiantou o pagamento), a referência vira a do mês seguinte.
+  // A fatura "atual" é a da competência aberta hoje, pela regra de
+  // fechamento do cartão — não necessariamente o mês civil de hoje (se o
+  // cartão fecha dia 9 e hoje é dia 15, a competência atual já é a do mês
+  // seguinte). Se ela já foi paga (usuário adiantou o pagamento), a
+  // próxima assume o posto.
   const today = new Date();
-  let currentInvoice = findInvoiceFor(today.getFullYear(), today.getMonth() + 1);
-  if (currentInvoice?.status === "paid") {
-    const nextRef = new Date(today.getFullYear(), today.getMonth() + 1, 1);
-    currentInvoice = findInvoiceFor(nextRef.getFullYear(), nextRef.getMonth() + 1);
+  let currentInvoice: Invoice | undefined;
+  if (selectedCard) {
+    const { year: curYear, month: curMonth } = referencePeriodFor(selectedCard.closing_day, today);
+    currentInvoice = findInvoiceFor(curYear, curMonth);
+    if (currentInvoice?.status === "paid") {
+      const idx = sortedInvoices.findIndex((i) => i.id === currentInvoice!.id);
+      currentInvoice = sortedInvoices[idx + 1];
+    }
   }
-  // Fallback: se ainda não existe fatura gerada para o mês atual, cai para a
-  // primeira em aberto (evita a tela ficar sem nada em cartões muito novos).
+  // Fallback: se ainda não existe fatura gerada para a competência atual
+  // ainda (nenhuma compra lançada neste ciclo), cai para a primeira em aberto.
   if (!currentInvoice) {
     currentInvoice = sortedInvoices.find((i) => i.status !== "paid");
   }

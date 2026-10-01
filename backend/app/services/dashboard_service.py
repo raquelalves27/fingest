@@ -7,11 +7,12 @@ from sqlalchemy.orm import Session
 
 from app.models.category import Category
 from app.models.credit_card import (
-    CreditCardInvoice, InvoiceStatus, CreditCard, CreditCardInstallment, InstallmentStatus,
+    CreditCardInvoice, CreditCard, CreditCardInstallment, InstallmentStatus,
     CreditCardPurchase,
 )
 from app.models.transaction import Income, Expense, IncomeStatus, ExpenseStatus
 from app.services import balance_service
+from app.services.invoice_service import current_invoice_ids_for_user
 
 
 def _month_bounds(ref: date) -> tuple[date, date]:
@@ -61,22 +62,20 @@ def get_summary(db: Session, user_id: str) -> dict:
     prev_income = _sum_income(db, user_id, prev_start, prev_end)
     prev_expenses = _sum_expense(db, user_id, prev_start, prev_end)
 
-    # Total da fatura atual = soma das parcelas (não canceladas) das faturas
-    # abertas/fechadas do mês corrente. A fatura não guarda um total próprio —
-    # é sempre derivado das parcelas, para nunca dessincronizar (seção 11/12 do escopo).
+    # Total da fatura atual = soma das parcelas (não canceladas) da fatura
+    # atual de cada cartão (ver `invoice_service.current_invoice_ids_for_user`). A fatura não guarda
+    # um total próprio — é sempre derivado das parcelas, para nunca
+    # dessincronizar (seção 11/12 do escopo).
+    current_ids = current_invoice_ids_for_user(db, user_id, today)
     invoices_total = (
         db.query(func.coalesce(func.sum(CreditCardInstallment.amount), 0))
-        .join(CreditCardInvoice, CreditCardInvoice.id == CreditCardInstallment.invoice_id)
-        .join(CreditCard, CreditCard.id == CreditCardInvoice.credit_card_id)
         .filter(
-            CreditCard.user_id == user_id,
-            CreditCard.deleted_at.is_(None),
-            CreditCardInvoice.status.in_([InvoiceStatus.open, InvoiceStatus.closed]),
-            CreditCardInvoice.reference_month == today.month,
-            CreditCardInvoice.reference_year == today.year,
+            CreditCardInstallment.invoice_id.in_(current_ids),
             CreditCardInstallment.status != InstallmentStatus.cancelled,
         )
         .scalar()
+        if current_ids
+        else 0
     )
 
     payable_total = (
@@ -136,8 +135,9 @@ def get_cash_flow(db: Session, user_id: str, months: int = 6) -> list[dict]:
 
 def get_category_breakdown(db: Session, user_id: str) -> list[dict]:
     """Gastos por categoria no mês atual — combina despesas avulsas e o que já
-    está na fatura do cartão (mesma janela usada em `current_invoices_total`),
-    senão categorias só existentes no cartão nunca apareceriam aqui."""
+    está na fatura atual do cartão de cada cartão (mesma seleção usada em
+    `current_invoices_total`), senão categorias só existentes no cartão nunca
+    apareceriam aqui."""
     today = date.today()
     start, end = _month_bounds(today)
 
@@ -158,26 +158,23 @@ def get_category_breakdown(db: Session, user_id: str) -> list[dict]:
         .all()
     )
 
+    current_ids = current_invoice_ids_for_user(db, user_id, today)
     card_rows = (
         db.query(
             Category.id, Category.name, Category.color,
             func.coalesce(func.sum(CreditCardInstallment.amount), 0).label("total"),
         )
         .select_from(CreditCardInstallment)
-        .join(CreditCardInvoice, CreditCardInvoice.id == CreditCardInstallment.invoice_id)
-        .join(CreditCard, CreditCard.id == CreditCardInvoice.credit_card_id)
         .join(CreditCardPurchase, CreditCardPurchase.id == CreditCardInstallment.purchase_id)
         .join(Category, Category.id == CreditCardPurchase.category_id)
         .filter(
-            CreditCard.user_id == user_id,
-            CreditCard.deleted_at.is_(None),
-            CreditCardInvoice.status.in_([InvoiceStatus.open, InvoiceStatus.closed]),
-            CreditCardInvoice.reference_month == today.month,
-            CreditCardInvoice.reference_year == today.year,
+            CreditCardInstallment.invoice_id.in_(current_ids),
             CreditCardInstallment.status != InstallmentStatus.cancelled,
         )
         .group_by(Category.id, Category.name, Category.color)
         .all()
+        if current_ids
+        else []
     )
 
     totals: dict[str, dict] = {}

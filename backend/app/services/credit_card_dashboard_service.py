@@ -27,6 +27,7 @@ from app.models.credit_card import (
     CreditCard, CreditCardInstallment, CreditCardInvoice, CreditCardPurchase,
     InstallmentStatus, InvoiceStatus,
 )
+from app.services.invoice_service import select_current_invoice
 
 _MONTHS_PT = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"]
 
@@ -141,7 +142,6 @@ def _build_cards(db: Session, user_id: str, today: date):
     for lst in invoices_by_card.values():
         lst.sort(key=lambda i: (i.reference_year, i.reference_month))
 
-    today_key = (today.year, today.month)
     panels = []
     current_invoice_ids: list[str] = []
     overdue_invoices: list[dict] = []
@@ -153,18 +153,7 @@ def _build_cards(db: Session, user_id: str, today: date):
 
         card_invoices = invoices_by_card.get(card.id, [])
 
-        # "Atual" é sempre a fatura do mês corrente. Se ela já foi paga (o
-        # usuário adiantou o pagamento), a próxima já assume o posto.
-        current = next(
-            (i for i in card_invoices if (i.reference_year, i.reference_month) == today_key), None
-        )
-        if current is not None and current.status == InvoiceStatus.paid:
-            idx = card_invoices.index(current)
-            current = card_invoices[idx + 1] if idx + 1 < len(card_invoices) else None
-        if current is None:
-            # Cartão sem fatura gerada pro mês atual ainda (nenhuma compra
-            # lançada este mês) — cai pra mais antiga em aberto, se houver.
-            current = next((i for i in card_invoices if i.status != InvoiceStatus.paid), None)
+        current = select_current_invoice(card, card_invoices, today)
 
         idx = card_invoices.index(current) if current else -1
         nxt = card_invoices[idx + 1] if idx >= 0 and idx + 1 < len(card_invoices) else None

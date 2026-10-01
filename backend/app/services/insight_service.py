@@ -15,6 +15,7 @@ from app.models.credit_card import CreditCard, CreditCardInstallment, CreditCard
 from app.models.transaction import Expense, ExpenseStatus
 from app.lib.currency import format_brl
 from app.services import dashboard_service
+from app.services.invoice_service import current_invoice_ids_for_user
 
 
 def _month_bounds(ref: date) -> tuple[date, date]:
@@ -67,16 +68,19 @@ def get_insights(db: Session, user_id: str) -> list[dict]:
     )
     total_expenses_month = Decimal(total_expenses_month)
 
+    # Fatura atual de cada cartão (não "mês civil == reference_month": cada
+    # cartão pode ter um closing_day diferente, então a competência aberta
+    # hoje nem sempre é a do mês corrente — ver `current_invoice_ids_for_user`).
+    current_ids = current_invoice_ids_for_user(db, user_id, today)
     card_installments_month = (
         db.query(func.coalesce(func.sum(CreditCardInstallment.amount), 0))
-        .join(CreditCardInvoice, CreditCardInvoice.id == CreditCardInstallment.invoice_id)
-        .join(CreditCard, CreditCard.id == CreditCardInvoice.credit_card_id)
         .filter(
-            CreditCard.user_id == user_id, CreditCard.deleted_at.is_(None),
+            CreditCardInstallment.invoice_id.in_(current_ids),
             CreditCardInstallment.status != InstallmentStatus.cancelled,
-            CreditCardInvoice.reference_month == today.month, CreditCardInvoice.reference_year == today.year,
         )
         .scalar()
+        if current_ids
+        else 0
     )
     card_installments_month = Decimal(card_installments_month)
 
