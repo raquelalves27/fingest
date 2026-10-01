@@ -1,9 +1,13 @@
 """Regra de fechamento de fatura (seção 14 do escopo):
 
 Dado um cartão que fecha no dia D (closing_day) e uma compra/parcela com
-data de referência C:
-  - se dia(C) <= D: cai na fatura do mês/ano de C
-  - se dia(C) >  D: cai na fatura do mês seguinte
+data de referência C, a fatura de um mês M fecha no dia D do mês SEGUINTE
+(M+1) — não do próprio mês M (ex: fecha dia 9 -> a fatura "Setembro" fecha
+em 9 de outubro, não 9 de setembro). Daí:
+  - se dia(C) >  D: cai na fatura do mês de C (ainda não passou do
+    fechamento da fatura do mês de C, que só fecha no mês seguinte)
+  - se dia(C) <= D: já passou do fechamento da fatura do mês anterior a C
+    (que fecha no dia D do mês de C) e cai nela
 
 A fatura é buscada por (credit_card_id, mês, ano); se não existir, é criada
 nesse momento com closing_date/due_date calculados a partir de
@@ -29,16 +33,21 @@ def _safe_day(year: int, month: int, day: int) -> int:
 
 def reference_period_for(credit_card: CreditCard, reference_date: date) -> tuple[int, int]:
     """(mês, ano) da competência que `reference_date` cai, pela regra do
-    `closing_day` do cartão — sem efeito colateral de criar fatura. É a
+    `closing_day` do cartão (ver docstring do módulo: a fatura do mês M
+    fecha no dia D do mês M+1) — sem efeito colateral de criar fatura. É a
     metade "pura" de `resolve_invoice_for_date`; existe separada porque
     quem só precisa saber "qual é a fatura atual agora" (telas de
     consulta/resumo) não deve criar faturas como efeito colateral de uma
     leitura, e porque cada cartão pode ter um `closing_day` diferente — não
-    dá pra usar o mês/ano civil de hoje como proxy da competência atual."""
-    if reference_date.day <= credit_card.closing_day:
+    dá pra usar o mês/ano civil de hoje como proxy da competência atual.
+
+    Ex: fecha dia 9 — 12/09 cai em "Setembro" (dia 12 > 9, ainda não fechou);
+    05/10 também cai em "Setembro" (dia 5 <= 9, já passou do fechamento de
+    Setembro em 9/10); 12/10 cai em "Outubro" (dia 12 > 9)."""
+    if reference_date.day > credit_card.closing_day:
         invoice_month_date = reference_date.replace(day=1)
     else:
-        invoice_month_date = reference_date.replace(day=1) + relativedelta(months=1)
+        invoice_month_date = reference_date.replace(day=1) - relativedelta(months=1)
     return invoice_month_date.month, invoice_month_date.year
 
 
@@ -115,10 +124,13 @@ def resolve_invoice_for_date(db: Session, credit_card: CreditCard, reference_dat
     if invoice:
         return invoice
 
-    closing_day = _safe_day(year, month, credit_card.closing_day)
-    closing_date = date(year, month, closing_day)
+    # A fatura de referência (month, year) fecha no dia closing_day do mês
+    # SEGUINTE — não do próprio mês de referência (ver docstring do módulo).
+    closing_month_date = date(year, month, 1) + relativedelta(months=1)
+    closing_day = _safe_day(closing_month_date.year, closing_month_date.month, credit_card.closing_day)
+    closing_date = date(closing_month_date.year, closing_month_date.month, closing_day)
 
-    due_month_date = date(year, month, 1)
+    due_month_date = closing_month_date
     due_day = _safe_day(due_month_date.year, due_month_date.month, credit_card.due_day)
     due_date = date(due_month_date.year, due_month_date.month, due_day)
     # Se o vencimento cair antes ou no mesmo dia do fechamento (configuração
