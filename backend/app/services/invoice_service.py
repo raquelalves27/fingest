@@ -1,13 +1,10 @@
 """Regra de fechamento de fatura (seção 14 do escopo):
 
-Dado um cartão que fecha no dia D (closing_day) e uma compra/parcela com
-data de referência C, a fatura de um mês M fecha no dia D do mês SEGUINTE
-(M+1) — não do próprio mês M (ex: fecha dia 9 -> a fatura "Setembro" fecha
-em 9 de outubro, não 9 de setembro). Daí:
-  - se dia(C) >  D: cai na fatura do mês de C (ainda não passou do
-    fechamento da fatura do mês de C, que só fecha no mês seguinte)
-  - se dia(C) <= D: já passou do fechamento da fatura do mês anterior a C
-    (que fecha no dia D do mês de C) e cai nela
+Uma compra/parcela com data de referência C sempre cai na fatura do mês
+civil de C (reference_month/year = mês/ano de C) — o `closing_day` do
+cartão NÃO desloca isso. O que `closing_day` define é só em que dia do mês
+SEGUINTE essa fatura fecha e vence (ex: fecha dia 9 -> a fatura "Setembro",
+com compras de 1 a 30/09, fecha em 9 de outubro — não em 9 de setembro).
 
 A fatura é buscada por (credit_card_id, mês, ano); se não existir, é criada
 nesse momento com closing_date/due_date calculados a partir de
@@ -32,23 +29,18 @@ def _safe_day(year: int, month: int, day: int) -> int:
 
 
 def reference_period_for(credit_card: CreditCard, reference_date: date) -> tuple[int, int]:
-    """(mês, ano) da competência que `reference_date` cai, pela regra do
-    `closing_day` do cartão (ver docstring do módulo: a fatura do mês M
-    fecha no dia D do mês M+1) — sem efeito colateral de criar fatura. É a
-    metade "pura" de `resolve_invoice_for_date`; existe separada porque
-    quem só precisa saber "qual é a fatura atual agora" (telas de
-    consulta/resumo) não deve criar faturas como efeito colateral de uma
-    leitura, e porque cada cartão pode ter um `closing_day` diferente — não
-    dá pra usar o mês/ano civil de hoje como proxy da competência atual.
+    """(mês, ano) da competência que `reference_date` cai: sempre o próprio
+    mês civil de `reference_date` (ver docstring do módulo — `closing_day`
+    não desloca isso, só define quando a fatura fecha/vence). Existe como
+    função separada de `resolve_invoice_for_date` porque quem só precisa
+    saber "qual é a fatura atual agora" (telas de consulta/resumo) não deve
+    criar faturas como efeito colateral de uma leitura.
 
-    Ex: fecha dia 9 — 12/09 cai em "Setembro" (dia 12 > 9, ainda não fechou);
-    05/10 também cai em "Setembro" (dia 5 <= 9, já passou do fechamento de
-    Setembro em 9/10); 12/10 cai em "Outubro" (dia 12 > 9)."""
-    if reference_date.day > credit_card.closing_day:
-        invoice_month_date = reference_date.replace(day=1)
-    else:
-        invoice_month_date = reference_date.replace(day=1) - relativedelta(months=1)
-    return invoice_month_date.month, invoice_month_date.year
+    `credit_card` é mantido no parâmetro por simetria com
+    `resolve_invoice_for_date` e porque o chamador normalmente já tem o
+    objeto em mãos (a competência em si não depende de nenhum campo do
+    cartão, só a data de fechamento/vencimento depende)."""
+    return reference_date.month, reference_date.year
 
 
 def select_current_invoice(

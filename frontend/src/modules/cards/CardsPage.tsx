@@ -17,21 +17,13 @@ interface InvoiceLineItem {
   installment: Installment;
 }
 
-/** (ano, mês) da competência que está aberta em `ref`, pela regra de
- * fechamento do cartão (seção 14 do escopo, mesma do backend em
- * `invoice_service.reference_period_for`): a fatura do mês M fecha no dia
- * closingDay do mês SEGUINTE (M+1) — não do próprio mês M. Então dia >
- * closingDay ainda cai na competência do mês civil de `ref` (ainda não
- * fechou); dia <= closingDay já passou do fechamento da competência do mês
- * anterior e cai nela. Ex: fecha dia 9 — 12/09 cai em "Setembro" (fecha
- * 9/10); 05/10 também cai em "Setembro" (dia 5 <= 9); 12/10 já cai em
- * "Outubro" (fecha 9/11). */
-function referencePeriodFor(closingDay: number, ref: Date): { year: number; month: number } {
-  const d =
-    ref.getDate() > closingDay
-      ? new Date(ref.getFullYear(), ref.getMonth(), 1)
-      : new Date(ref.getFullYear(), ref.getMonth() - 1, 1);
-  return { year: d.getFullYear(), month: d.getMonth() + 1 };
+/** (ano, mês) da competência de `ref`: sempre o próprio mês civil de `ref`
+ * (mesma regra do backend em `invoice_service.reference_period_for`) — o
+ * dia de fechamento do cartão não desloca isso, só define em que dia do
+ * mês seguinte essa fatura fecha/vence. `closingDay` fica no parâmetro só
+ * por simetria com o backend (hoje não é usado aqui). */
+function referencePeriodFor(_closingDay: number, ref: Date): { year: number; month: number } {
+  return { year: ref.getFullYear(), month: ref.getMonth() + 1 };
 }
 
 function lineItemMeta(item: InvoiceLineItem): string {
