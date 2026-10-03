@@ -54,18 +54,22 @@ def reference_period_for(credit_card: CreditCard, reference_date: date) -> tuple
 def select_current_invoice(
     credit_card: CreditCard, invoices_sorted: list[CreditCardInvoice], today: date
 ) -> CreditCardInvoice | None:
-    """A fatura 'atual' de um cartão: a da competência aberta hoje (ver
-    `reference_period_for`) — não necessariamente a do mês civil de hoje.
-    Se essa fatura já foi paga (usuário adiantou o pagamento), a próxima
-    assume o posto. Se ainda não existe fatura pra competência atual
-    (nenhuma compra lançada neste ciclo ainda), cai pra mais antiga em
-    aberto. `invoices_sorted` precisa estar ordenada por
-    (reference_year, reference_month) crescente. Usada por toda tela/painel
-    que precisa saber "qual fatura é a atual" sem criar uma como efeito
-    colateral de uma leitura."""
-    month, year = reference_period_for(credit_card, today)
+    """A fatura 'atual' de um cartão, pra exibição: sempre a do mês civil de
+    hoje — decisão de produto, não a competência que `reference_period_for`
+    diria estar tecnicamente aberta (que pode ser o mês anterior até o dia
+    do fechamento). É só rótulo/seleção de exibição: continua podendo
+    existir uma compra de hoje que, pela regra de fechamento, cai numa
+    fatura diferente da que aparece como "atual" — isso é esperado.
+
+    Se a fatura do mês civil de hoje já foi paga (usuário adiantou o
+    pagamento), a próxima assume o posto. Se ainda não existe fatura pro
+    mês civil de hoje (nenhuma compra lançada ainda que tenha criado uma),
+    cai pra mais antiga em aberto. `invoices_sorted` precisa estar ordenada
+    por (reference_year, reference_month) crescente. Usada por toda
+    tela/painel que precisa saber "qual fatura é a atual" sem criar uma
+    como efeito colateral de uma leitura."""
     current = next(
-        (i for i in invoices_sorted if (i.reference_year, i.reference_month) == (year, month)), None
+        (i for i in invoices_sorted if (i.reference_year, i.reference_month) == (today.year, today.month)), None
     )
     if current is not None and current.status == InvoiceStatus.paid:
         idx = invoices_sorted.index(current)

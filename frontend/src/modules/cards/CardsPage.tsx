@@ -17,20 +17,6 @@ interface InvoiceLineItem {
   installment: Installment;
 }
 
-/** (ano, mês) da competência que está aberta em `ref`, pela regra de
- * fechamento do cartão (mesma do backend em
- * `invoice_service.reference_period_for`): dia >= closingDay fica no mês
- * civil de `ref`; dia < closingDay cai no mês anterior. Ex: fecha dia 9 —
- * 05/09 (dia 5) cai em Agosto; 09/09, 10/09, 30/09 (dia >= 9) caem em
- * Setembro; 09/10 já cai em Outubro. */
-function referencePeriodFor(closingDay: number, ref: Date): { year: number; month: number } {
-  const d =
-    ref.getDate() >= closingDay
-      ? new Date(ref.getFullYear(), ref.getMonth(), 1)
-      : new Date(ref.getFullYear(), ref.getMonth() - 1, 1);
-  return { year: d.getFullYear(), month: d.getMonth() + 1 };
-}
-
 function lineItemMeta(item: InvoiceLineItem): string {
   const { purchase: p, installment: inst } = item;
   const base = p.is_recurring
@@ -102,16 +88,16 @@ export function CardsPage() {
     return sortedInvoices.find((i) => i.reference_year === year && i.reference_month === month);
   }
 
-  // A fatura "atual" é a da competência aberta hoje, pela regra de
-  // fechamento do cartão — não necessariamente o mês civil de hoje (se o
-  // cartão fecha dia 9 e hoje é dia 15, a competência atual já é a do mês
-  // seguinte). Se ela já foi paga (usuário adiantou o pagamento), a
-  // próxima assume o posto.
+  // A fatura "atual" (rótulo de exibição) é sempre a do mês civil de hoje —
+  // não necessariamente a competência que a regra de fechamento diria estar
+  // tecnicamente aberta (isso só importa pra decidir em qual fatura uma
+  // compra cai, lá no backend; aqui é só qual fatura mostrar como "atual").
+  // Se ela já foi paga (usuário adiantou o pagamento), a próxima assume o
+  // posto.
   const today = new Date();
   let currentInvoice: Invoice | undefined;
   if (selectedCard) {
-    const { year: curYear, month: curMonth } = referencePeriodFor(selectedCard.closing_day, today);
-    currentInvoice = findInvoiceFor(curYear, curMonth);
+    currentInvoice = findInvoiceFor(today.getFullYear(), today.getMonth() + 1);
     if (currentInvoice?.status === "paid") {
       const idx = sortedInvoices.findIndex((i) => i.id === currentInvoice!.id);
       currentInvoice = sortedInvoices[idx + 1];
