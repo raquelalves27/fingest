@@ -1,14 +1,14 @@
 """Regra de fechamento de fatura (seção 14 do escopo):
 
-Dado um cartão que fecha no dia D (closing_day) e uma compra/parcela com
-data de referência C:
-  - se dia(C) >= D: cai na fatura do mês/ano de C
-  - se dia(C) <  D: cai na fatura do mês anterior a C
+Dado um cartão que fecha no dia D (closing_day), o corte efetivo pra
+bucketing é o dia (D-1) — ou seja, a fatura de um mês M vai do dia (D-1) do
+próprio mês M até o dia (D-2) do mês M+1, e fecha no dia (D-1) do mês
+SEGUINTE (ex: fecha dia 9 -> a fatura "Outubro" cobre de 08/09 a 07/10 e
+fecha em 08/10 — o próprio dia 8/10 já pertence a Novembro).
 
-Ou seja, a janela de uma fatura do mês M vai do dia D do próprio mês M até
-o dia (D-1) do mês M+1 — por isso ela só fecha/vence no mês SEGUINTE (ex:
-fecha dia 9 -> a fatura "Setembro" cobre de 09/09 a 08/10, e fecha em
-09/10 — não em 09/09; 09/09 já pertence a Setembro, não a Agosto).
+Dado uma compra/parcela com data de referência C:
+  - se dia(C) >= (D-1): cai na fatura do mês SEGUINTE ao de C
+  - se dia(C) <  (D-1): cai na fatura do próprio mês de C
 
 A fatura é buscada por (credit_card_id, mês, ano); se não existir, é criada
 nesse momento com closing_date/due_date calculados a partir de
@@ -27,9 +27,17 @@ from app.models.credit_card import CreditCard, CreditCardInvoice, InvoiceStatus
 
 def _safe_day(year: int, month: int, day: int) -> int:
     """Evita erro em meses com menos dias que o dia configurado
-    (ex: fechamento dia 31 em fevereiro -> usa o último dia do mês)."""
+    (ex: fechamento dia 31 em fevereiro -> usa o último dia do mês), e
+    nunca deixa o dia cair abaixo de 1 (cartão configurado com
+    closing_day=1, caso extremo)."""
     last_day = calendar.monthrange(year, month)[1]
-    return min(day, last_day)
+    return min(max(day, 1), last_day)
+
+
+def _bucketing_threshold(credit_card: CreditCard) -> int:
+    """Dia de corte efetivo pro bucketing — um dia antes do closing_day
+    configurado (ver docstring do módulo)."""
+    return max(1, credit_card.closing_day - 1)
 
 
 def reference_period_for(credit_card: CreditCard, reference_date: date) -> tuple[int, int]:
@@ -41,13 +49,14 @@ def reference_period_for(credit_card: CreditCard, reference_date: date) -> tuple
     colateral de uma leitura, e porque cada cartão pode ter um `closing_day`
     diferente — não dá pra usar o mês/ano civil de hoje como proxy direto.
 
-    Ex: fecha dia 9 — 05/09 (dia 5 < 9) cai em "Agosto"; 09/09, 10/09, 12/09,
-    30/09 (dia >= 9) caem em "Setembro"; 09/10 (dia 9 do mês seguinte) já
-    cai em "Outubro"."""
-    if reference_date.day >= credit_card.closing_day:
-        invoice_month_date = reference_date.replace(day=1)
+    Ex: fecha dia 9 (corte em 8) — 05/09 (dia 5 < 8) cai em "Setembro";
+    08/09, 09/09, 30/09 (dia >= 8) caem em "Outubro"; 07/10 (dia 7 < 8)
+    ainda cai em "Outubro"; 08/10 (dia 8 >= 8) já cai em "Novembro"."""
+    threshold = _bucketing_threshold(credit_card)
+    if reference_date.day >= threshold:
+        invoice_month_date = reference_date.replace(day=1) + relativedelta(months=1)
     else:
-        invoice_month_date = reference_date.replace(day=1) - relativedelta(months=1)
+        invoice_month_date = reference_date.replace(day=1)
     return invoice_month_date.month, invoice_month_date.year
 
 
@@ -115,21 +124,22 @@ def current_invoice_ids_for_user(db: Session, user_id: str, today: date) -> list
 
 def closing_and_due_dates(credit_card: CreditCard, month: int, year: int) -> tuple[date, date]:
     """(closing_date, due_date) da fatura de referência (month, year) — a
-    fatura fecha no dia `closing_day` do mês SEGUINTE a (month, year), não
-    do próprio mês de referência (ver docstring do módulo). Função pura,
-    sem tocar no banco — usada tanto para criar uma fatura nova quanto para
-    corrigir fechamento/vencimento de uma fatura já existente cujo rótulo
-    mudou (ex: migração de dados), já que esses dois campos dependem só de
-    (month, year, closing_day, due_day), nunca da data da compra em si."""
-    closing_month_date = date(year, month, 1) + relativedelta(months=1)
-    closing_day = _safe_day(closing_month_date.year, closing_month_date.month, credit_card.closing_day)
-    closing_date = date(closing_month_date.year, closing_month_date.month, closing_day)
+    fatura fecha no dia de corte (ver `_bucketing_threshold`) do PRÓPRIO mês
+    de referência: é o primeiro dia excluído da janela dela (ver docstring
+    do módulo). Função pura, sem tocar no banco — usada tanto para criar
+    uma fatura nova quanto para corrigir fechamento/vencimento de uma
+    fatura já existente cujo rótulo mudou (ex: migração de dados), já que
+    esses dois campos dependem só de (month, year, closing_day, due_day),
+    nunca da data da compra em si."""
+    threshold = _bucketing_threshold(credit_card)
+    closing_day = _safe_day(year, month, threshold)
+    closing_date = date(year, month, closing_day)
 
-    due_month_date = closing_month_date
+    due_month_date = date(year, month, 1)
     due_day = _safe_day(due_month_date.year, due_month_date.month, credit_card.due_day)
     due_date = date(due_month_date.year, due_month_date.month, due_day)
-    # Se o vencimento cair antes ou no mesmo dia do fechamento (configuração
-    # comum: fecha dia 25, vence dia 5 do mês seguinte), empurra pro mês seguinte.
+    # Se o vencimento cair antes ou no mesmo dia do fechamento, empurra pro
+    # mês seguinte (ex: fechamento efetivo dia 8, vencimento configurado dia 5).
     if due_date <= closing_date:
         due_month_date = due_month_date + relativedelta(months=1)
         due_day = _safe_day(due_month_date.year, due_month_date.month, credit_card.due_day)
