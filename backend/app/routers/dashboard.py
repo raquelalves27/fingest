@@ -5,7 +5,8 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.user import User
 from app.schemas.dashboard import (
-    CashFlowResponse, CategoryBreakdownResponse, CreditCardDashboardResponse, DashboardSummary,
+    CashFlowResponse, CategoryBreakdownItemsResponse, CategoryBreakdownResponse,
+    CreditCardDashboardResponse, DashboardSummary,
 )
 from app.services import (
     credit_card_dashboard_service, dashboard_service, purchase_service, recurring_service,
@@ -36,6 +37,16 @@ def cash_flow(
 @router.get("/category-breakdown", response_model=CategoryBreakdownResponse)
 def category_breakdown(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     items = dashboard_service.get_category_breakdown(db, current_user.id)
+    return {"items": items}
+
+
+@router.get("/category-breakdown/items", response_model=CategoryBreakdownItemsResponse)
+def category_breakdown_items(
+    category_id: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    items = dashboard_service.get_category_breakdown_items(db, current_user.id, category_id)
     return {"items": items}
 
 

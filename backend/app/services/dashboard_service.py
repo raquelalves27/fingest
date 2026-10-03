@@ -201,3 +201,74 @@ def get_category_breakdown(db: Session, user_id: str) -> list[dict]:
         items.append({**entry, "percentage": round(pct, 1)})
     items.sort(key=lambda i: i["total"], reverse=True)
     return items
+
+
+def get_category_breakdown_items(db: Session, user_id: str, category_id: str | None) -> list[dict]:
+    """Lançamentos individuais por trás de uma linha de `get_category_breakdown`
+    — a mesma despesa avulsa (mês atual) + parcela da fatura atual do cartão
+    somada ali, mas detalhada item a item em vez de só o total. Mesma regra
+    de escopo (ver `get_category_breakdown`). `category_id=None` busca os
+    lançamentos sem categoria."""
+    today = date.today()
+    start, end = _month_bounds(today)
+
+    expenses = (
+        db.query(Expense)
+        .filter(
+            Expense.user_id == user_id,
+            Expense.deleted_at.is_(None),
+            Expense.status != ExpenseStatus.cancelled,
+            Expense.expense_date >= start,
+            Expense.expense_date <= end,
+            Expense.category_id == category_id,  # SQLAlchemy traduz None -> IS NULL
+        )
+        .all()
+    )
+
+    items = [
+        {
+            "kind": "expense",
+            "id": e.id,
+            "description": e.description,
+            "date": e.expense_date,
+            "amount": Decimal(e.amount),
+            "card_id": None,
+            "card_name": None,
+            "installment_number": None,
+            "total_installments": None,
+            "is_recurring": False,
+            "status": e.status.value if hasattr(e.status, "value") else str(e.status),
+        }
+        for e in expenses
+    ]
+
+    current_ids = current_invoice_ids_for_user(db, user_id, today)
+    if current_ids:
+        rows = (
+            db.query(CreditCardInstallment, CreditCardPurchase, CreditCard)
+            .join(CreditCardPurchase, CreditCardPurchase.id == CreditCardInstallment.purchase_id)
+            .join(CreditCard, CreditCard.id == CreditCardPurchase.credit_card_id)
+            .filter(
+                CreditCardInstallment.invoice_id.in_(current_ids),
+                CreditCardInstallment.status != InstallmentStatus.cancelled,
+                CreditCardPurchase.category_id == category_id,
+            )
+            .all()
+        )
+        for inst, purchase, card in rows:
+            items.append({
+                "kind": "card_purchase",
+                "id": purchase.id,
+                "description": purchase.description,
+                "date": purchase.purchase_date,
+                "amount": Decimal(inst.amount),
+                "card_id": card.id,
+                "card_name": card.name,
+                "installment_number": inst.installment_number,
+                "total_installments": inst.total_installments,
+                "is_recurring": purchase.is_recurring,
+                "status": purchase.status.value if hasattr(purchase.status, "value") else str(purchase.status),
+            })
+
+    items.sort(key=lambda i: i["date"], reverse=True)
+    return items

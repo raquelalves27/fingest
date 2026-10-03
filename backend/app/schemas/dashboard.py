@@ -41,6 +41,24 @@ class CategoryBreakdownResponse(BaseModel):
     items: List[CategoryBreakdownItem]
 
 
+class CategoryBreakdownLineItem(BaseModel):
+    kind: Literal["expense", "card_purchase"]
+    id: str
+    description: str
+    date: date
+    amount: Decimal
+    card_id: Optional[str] = None
+    card_name: Optional[str] = None
+    installment_number: Optional[int] = None
+    total_installments: Optional[int] = None
+    is_recurring: bool = False
+    status: str
+
+
+class CategoryBreakdownItemsResponse(BaseModel):
+    items: List[CategoryBreakdownLineItem]
+
+
 # --- Painel de cartões de crédito (foco em tomada de decisão) ---
 
 class CreditCardInvoiceBrief(BaseModel):

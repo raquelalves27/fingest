@@ -53,6 +53,11 @@ export async function listPurchases(creditCardId?: string): Promise<Purchase[]> 
   return data;
 }
 
+export async function getPurchase(id: string): Promise<Purchase> {
+  const { data } = await api.get<Purchase>(`/credit-card-purchases/${id}`);
+  return data;
+}
+
 export async function createPurchase(payload: PurchaseCreatePayload): Promise<Purchase> {
   const { data } = await api.post<Purchase>("/credit-card-purchases", payload);
   return data;

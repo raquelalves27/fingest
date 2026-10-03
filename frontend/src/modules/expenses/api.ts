@@ -24,6 +24,16 @@ export interface ExpenseCreatePayload {
   status: ExpenseStatus;
 }
 
+export interface ExpenseUpdatePayload {
+  description?: string;
+  amount?: string;
+  expense_date?: string;
+  account_id?: string | null;
+  category_id?: string | null;
+  payment_method?: string | null;
+  status?: ExpenseStatus;
+}
+
 export interface ExpenseFilters {
   start_date?: string;
   end_date?: string;
@@ -44,12 +54,17 @@ export async function listExpenses(filters: ExpenseFilters = {}): Promise<Expens
   return data;
 }
 
+export async function getExpense(id: string): Promise<Expense> {
+  const { data } = await api.get<Expense>(`/expenses/${id}`);
+  return data;
+}
+
 export async function createExpense(payload: ExpenseCreatePayload): Promise<Expense> {
   const { data } = await api.post<Expense>("/expenses", payload);
   return data;
 }
 
-export async function updateExpense(id: string, payload: Partial<ExpenseCreatePayload>): Promise<Expense> {
+export async function updateExpense(id: string, payload: ExpenseUpdatePayload): Promise<Expense> {
   const { data } = await api.put<Expense>(`/expenses/${id}`, payload);
   return data;
 }

@@ -20,20 +20,25 @@ export function DashboardPage() {
   const [breakdown, setBreakdown] = useState<CategoryBreakdownItem[]>([]);
   const [insights, setInsights] = useState<Insight[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  // Força a seção de cartões (que busca os dados dela por conta própria) a
+  // recarregar junto — editar um lançamento de cartão no detalhe de
+  // categoria também muda a fatura atual exibida lá.
+  const [reloadToken, setReloadToken] = useState(0);
+
+  async function reload() {
+    const [s, cf, cb, ins] = await Promise.all([
+      getSummary(), getCashFlow(), getCategoryBreakdown(), getInsights(),
+    ]);
+    setSummary(s);
+    setCashFlow(cf);
+    setBreakdown(cb);
+    setInsights(ins);
+    setReloadToken((t) => t + 1);
+  }
 
   useEffect(() => {
-    async function load() {
-      setIsLoading(true);
-      const [s, cf, cb, ins] = await Promise.all([
-        getSummary(), getCashFlow(), getCategoryBreakdown(), getInsights(),
-      ]);
-      setSummary(s);
-      setCashFlow(cf);
-      setBreakdown(cb);
-      setInsights(ins);
-      setIsLoading(false);
-    }
-    load();
+    reload().then(() => setIsLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const firstName = user?.name?.split(" ")[0];
@@ -89,10 +94,10 @@ export function DashboardPage() {
       {isLoading ? (
         <Skeleton className="h-64" />
       ) : (
-        <CategoryBreakdown items={breakdown} />
+        <CategoryBreakdown items={breakdown} onChanged={reload} />
       )}
 
-      <CreditCardSection />
+      <CreditCardSection key={reloadToken} />
 
       {isLoading ? (
         <Skeleton className="h-72" />

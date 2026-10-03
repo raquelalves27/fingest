@@ -1,8 +1,9 @@
 import { useState, type FormEvent } from "react";
 import { X, ArrowDownCircle, ArrowUpCircle } from "lucide-react";
 import { createIncome } from "@/modules/incomes/api";
-import { createExpense } from "@/modules/expenses/api";
+import { createExpense, updateExpense, type Expense } from "@/modules/expenses/api";
 import { useFormOptions } from "@/modules/transactions/useFormOptions";
+import { toDecimalInput, parseDecimalInput } from "@/lib/format";
 
 type TransactionKind = "income" | "expense";
 
@@ -10,20 +11,24 @@ interface Props {
   onClose: () => void;
   onCreated: () => void;
   initialKind?: TransactionKind;
+  /** Quando presente, o modal edita essa despesa em vez de criar um novo
+   * lançamento (não dá pra editar receita por aqui ainda). */
+  expense?: Expense;
 }
 
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
 
-export function QuickAddModal({ onClose, onCreated, initialKind = "expense" }: Props) {
+export function QuickAddModal({ onClose, onCreated, initialKind = "expense", expense }: Props) {
+  const isEditing = !!expense;
   const { accounts, categories, isLoading } = useFormOptions();
-  const [kind, setKind] = useState<TransactionKind>(initialKind);
-  const [description, setDescription] = useState("");
-  const [amount, setAmount] = useState("");
-  const [date, setDate] = useState(todayISO());
-  const [accountId, setAccountId] = useState("");
-  const [categoryId, setCategoryId] = useState("");
+  const [kind, setKind] = useState<TransactionKind>(isEditing ? "expense" : initialKind);
+  const [description, setDescription] = useState(expense?.description ?? "");
+  const [amount, setAmount] = useState(expense ? toDecimalInput(expense.amount) : "");
+  const [date, setDate] = useState(expense?.expense_date ?? todayISO());
+  const [accountId, setAccountId] = useState(expense?.account_id ?? "");
+  const [categoryId, setCategoryId] = useState(expense?.category_id ?? "");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -34,8 +39,16 @@ export function QuickAddModal({ onClose, onCreated, initialKind = "expense" }: P
     setError(null);
     setIsSubmitting(true);
     try {
-      const normalizedAmount = amount.replace(/\./g, "").replace(",", ".");
-      if (kind === "income") {
+      const normalizedAmount = parseDecimalInput(amount);
+      if (isEditing) {
+        await updateExpense(expense!.id, {
+          description,
+          amount: normalizedAmount,
+          expense_date: date,
+          account_id: accountId || null,
+          category_id: categoryId || null,
+        });
+      } else if (kind === "income") {
         await createIncome({
           description,
           amount: normalizedAmount,
@@ -66,39 +79,43 @@ export function QuickAddModal({ onClose, onCreated, initialKind = "expense" }: P
     <div className="fixed inset-0 z-20 flex items-end md:items-center justify-center bg-ink/40 backdrop-blur-sm">
       <div className="w-full md:max-w-md rounded-t-card md:rounded-card bg-paper-soft dark:bg-ink-soft border border-paper-border dark:border-ink-border p-6 shadow-soft">
         <div className="flex items-center justify-between mb-5">
-          <h3 className="font-display text-xl text-ink dark:text-paper">Adicionar</h3>
+          <h3 className="font-display text-xl text-ink dark:text-paper">
+            {isEditing ? "Editar despesa" : "Adicionar"}
+          </h3>
           <button onClick={onClose} className="text-olive hover:text-ink dark:hover:text-paper">
             <X size={20} />
           </button>
         </div>
 
         {/* Seletor de tipo */}
-        <div className="grid grid-cols-2 gap-2 mb-5">
-          <button
-            type="button"
-            onClick={() => setKind("expense")}
-            className={`flex items-center justify-center gap-2 rounded-card py-2.5 text-sm font-medium border transition ${
-              kind === "expense"
-                ? "border-clay bg-clay/10 text-clay"
-                : "border-paper-border dark:border-ink-border text-olive"
-            }`}
-          >
-            <ArrowDownCircle size={16} />
-            Despesa
-          </button>
-          <button
-            type="button"
-            onClick={() => setKind("income")}
-            className={`flex items-center justify-center gap-2 rounded-card py-2.5 text-sm font-medium border transition ${
-              kind === "income"
-                ? "border-emerald bg-emerald/10 text-emerald"
-                : "border-paper-border dark:border-ink-border text-olive"
-            }`}
-          >
-            <ArrowUpCircle size={16} />
-            Receita
-          </button>
-        </div>
+        {!isEditing && (
+          <div className="grid grid-cols-2 gap-2 mb-5">
+            <button
+              type="button"
+              onClick={() => setKind("expense")}
+              className={`flex items-center justify-center gap-2 rounded-card py-2.5 text-sm font-medium border transition ${
+                kind === "expense"
+                  ? "border-clay bg-clay/10 text-clay"
+                  : "border-paper-border dark:border-ink-border text-olive"
+              }`}
+            >
+              <ArrowDownCircle size={16} />
+              Despesa
+            </button>
+            <button
+              type="button"
+              onClick={() => setKind("income")}
+              className={`flex items-center justify-center gap-2 rounded-card py-2.5 text-sm font-medium border transition ${
+                kind === "income"
+                  ? "border-emerald bg-emerald/10 text-emerald"
+                  : "border-paper-border dark:border-ink-border text-olive"
+              }`}
+            >
+              <ArrowUpCircle size={16} />
+              Receita
+            </button>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
@@ -179,7 +196,13 @@ export function QuickAddModal({ onClose, onCreated, initialKind = "expense" }: P
               kind === "expense" ? "bg-clay hover:bg-clay-soft" : "bg-emerald hover:bg-emerald-deep"
             }`}
           >
-            {isSubmitting ? "Salvando…" : kind === "expense" ? "Salvar despesa" : "Salvar receita"}
+            {isSubmitting
+              ? "Salvando…"
+              : isEditing
+              ? "Salvar alterações"
+              : kind === "expense"
+              ? "Salvar despesa"
+              : "Salvar receita"}
           </button>
         </form>
       </div>

@@ -45,6 +45,27 @@ export async function getCategoryBreakdown(): Promise<CategoryBreakdownItem[]> {
   return data.items;
 }
 
+export interface CategoryBreakdownLineItem {
+  kind: "expense" | "card_purchase";
+  id: string;
+  description: string;
+  date: string;
+  amount: string;
+  card_id: string | null;
+  card_name: string | null;
+  installment_number: number | null;
+  total_installments: number | null;
+  is_recurring: boolean;
+  status: string;
+}
+
+export async function getCategoryBreakdownItems(categoryId: string | null): Promise<CategoryBreakdownLineItem[]> {
+  const { data } = await api.get<{ items: CategoryBreakdownLineItem[] }>("/dashboard/category-breakdown/items", {
+    params: categoryId ? { category_id: categoryId } : undefined,
+  });
+  return data.items;
+}
+
 // --- Painel de cartões de crédito ---
 
 export type CardHealth = "ok" | "attention" | "critical";
