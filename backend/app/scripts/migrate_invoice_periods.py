@@ -1,18 +1,15 @@
-"""Migração: garante que cada parcela esteja na fatura do mês civil certo
-(ver `app/services/invoice_service.py` — a competência de uma parcela é
-sempre o mês civil da sua data de referência; o `closing_day` do cartão só
-define quando a fatura fecha/vence, não pra qual fatura a parcela vai).
+"""Migração: garante que cada parcela esteja na fatura certa pela regra de
+fechamento do cartão (ver `app/services/invoice_service.py`: dia >=
+closing_day fica no mês civil da própria data; dia < closing_day cai no
+mês anterior).
 
-Substitui a abordagem da versão anterior deste script, que só deslocava o
-rótulo (reference_month/year) da fatura inteira em -1 mês. Isso acertava
-faturas compostas inteiramente por compras com dia > closing_day, mas
-misturava com elas as compras de dia <= closing_day que já estavam
-corretas (uma fatura antiga continha os dois tipos juntos), jogando-as pra
-um mês errado. Esta versão reclassifica cada PARCELA individualmente pela
-data real reconstruída da compra, então é segura de rodar de novo mesmo
-que a versão anterior já tenha rodado — ela corrige o que ficou torto e
-não mexe no que já está certo (idempotente: rodar duas vezes seguidas na
-segunda vez não deveria mover nada).
+Reclassifica cada PARCELA individualmente pela data real reconstruída da
+compra e pela regra atual de `reference_period_for` — então é seguro rodar
+de novo quantas vezes for preciso (inclusive depois de versões anteriores
+deste script, que usaram regras diferentes/erradas): ele corrige o que
+estiver fora do lugar pela regra VIGENTE no momento em que for rodado e não
+mexe no que já está certo (idempotente — rodar duas vezes seguidas na
+segunda não deveria mover nada).
 
 Só mexe em parcelas de faturas que ainda NÃO foram pagas — fatura paga é
 passado imutável (mesma regra usada no resto do sistema). Faturas que
@@ -32,7 +29,7 @@ from app.database import SessionLocal
 from app.models.credit_card import (
     CreditCard, CreditCardInstallment, CreditCardInvoice, CreditCardPurchase, InvoiceStatus,
 )
-from app.services.invoice_service import resolve_invoice_for_date
+from app.services.invoice_service import reference_period_for, resolve_invoice_for_date
 
 
 def _safe_day(year: int, month: int, day: int) -> int:
@@ -80,15 +77,16 @@ def run(dry_run: bool = False) -> None:
                 purchase = inst.purchase
                 current_invoice = inst.invoice
                 actual = _actual_date_for_installment(purchase, inst)
+                correct_month, correct_year = reference_period_for(card, actual)
 
-                if (current_invoice.reference_month, current_invoice.reference_year) == (actual.month, actual.year):
+                if (current_invoice.reference_month, current_invoice.reference_year) == (correct_month, correct_year):
                     continue  # já está na fatura certa
 
                 print(
                     f"cartão {card.name!r}: parcela {inst.installment_number}/{inst.total_installments} "
                     f"de {purchase.description!r} ({actual:%d/%m/%Y}) estava em "
                     f"{current_invoice.reference_month:02d}/{current_invoice.reference_year} -> "
-                    f"{actual.month:02d}/{actual.year}"
+                    f"{correct_month:02d}/{correct_year}"
                 )
                 total_moved += 1
                 if not dry_run:
