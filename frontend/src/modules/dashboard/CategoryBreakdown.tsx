@@ -60,7 +60,9 @@ export function CategoryBreakdown({ items }: { items: CategoryBreakdownItem[] })
                   <span className="text-xs text-olive/60 w-3.5 shrink-0 tabular-nums">{idx + 1}</span>
                   <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: color }} />
                   <span
-                    className={`truncate text-ink dark:text-paper ${isTop ? "font-semibold" : ""}`}
+                    className={`truncate text-ink dark:text-paper ${isTop ? "font-semibold" : ""} ${
+                      item.is_uncategorized ? "italic text-olive" : ""
+                    }`}
                   >
                     {item.category_name}
                   </span>

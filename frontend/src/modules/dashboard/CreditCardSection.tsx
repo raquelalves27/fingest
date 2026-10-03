@@ -1,17 +1,14 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { AlertTriangle, CreditCard, Info } from "lucide-react";
+import { AlertTriangle, CreditCard, Flame, Info } from "lucide-react";
 import {
   getCreditCardDashboard,
   type CardHealth,
-  type CardScope,
   type CreditCardDashboard,
   type CreditCardPanel,
 } from "@/modules/dashboard/api";
-import { CreditCardCategoryTree } from "@/modules/dashboard/CreditCardCategoryTree";
-import { CreditCardSpendTrend } from "@/modules/dashboard/CreditCardSpendTrend";
 import { Skeleton } from "@/components/shared/Skeleton";
-import { formatCurrency, formatPercent } from "@/lib/format";
+import { formatCurrency } from "@/lib/format";
 
 const HEALTH_DOT: Record<CardHealth, string> = {
   ok: "bg-emerald",
@@ -32,17 +29,7 @@ function dueLabel(days: number): { text: string; tone: string } {
   return { text: `vence em ${days}d`, tone: "text-olive" };
 }
 
-function MiniStat({ label, value, hint }: { label: string; value: string; hint?: string }) {
-  return (
-    <div className="rounded-card border border-paper-border dark:border-ink-border bg-paper dark:bg-ink px-4 py-3">
-      <p className="text-xs text-olive mb-1">{label}</p>
-      <p className="num text-lg text-ink dark:text-paper leading-tight">{value}</p>
-      {hint && <p className="text-[11px] text-olive/70 mt-0.5">{hint}</p>}
-    </div>
-  );
-}
-
-function CardPanel({ card }: { card: CreditCardPanel }) {
+function CardPanel({ card, isBiggest }: { card: CreditCardPanel; isBiggest: boolean }) {
   const ci = card.current_invoice;
   const due = ci ? dueLabel(ci.days_until_due) : null;
   const barColor = utilizationColor(card.utilization_pct);
@@ -51,9 +38,14 @@ function CardPanel({ card }: { card: CreditCardPanel }) {
     <div className="rounded-card border border-paper-border dark:border-ink-border bg-paper dark:bg-ink p-4 shadow-soft">
       <div className="flex items-start justify-between mb-3">
         <div className="min-w-0">
-          <p className="text-sm font-medium text-ink dark:text-paper flex items-center gap-2">
+          <p className="text-sm font-medium text-ink dark:text-paper flex items-center gap-2 flex-wrap">
             <span className={`w-2 h-2 rounded-full shrink-0 ${HEALTH_DOT[card.health]}`} />
             <span className="truncate">{card.name}</span>
+            {isBiggest && (
+              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-clay/10 text-clay shrink-0">
+                maior fatura
+              </span>
+            )}
           </p>
           <p className="text-xs text-olive mt-0.5">
             {[card.brand, card.last_four_digits && `•••• ${card.last_four_digits}`]
@@ -79,7 +71,7 @@ function CardPanel({ card }: { card: CreditCardPanel }) {
       </div>
       <div className="flex items-center justify-between text-[11px] text-olive">
         <span>{card.utilization_pct.toFixed(0)}% do limite usado</span>
-        <span>{formatCurrency(card.available_limit)} livres</span>
+        <span>{formatCurrency(card.available_limit)} livres de {formatCurrency(card.credit_limit)}</span>
       </div>
 
       {(parseFloat(card.next_invoice_total) > 0 || parseFloat(card.recurring_monthly_total) > 0) && (
@@ -102,13 +94,11 @@ const INSIGHT_ICON = {
 
 export function CreditCardSection() {
   const [data, setData] = useState<CreditCardDashboard | null>(null);
-  const [scope, setScope] = useState<CardScope>("current");
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     let alive = true;
-    setIsLoading(true);
-    getCreditCardDashboard(scope).then((d) => {
+    getCreditCardDashboard("current").then((d) => {
       if (alive) {
         setData(d);
         setIsLoading(false);
@@ -117,19 +107,14 @@ export function CreditCardSection() {
     return () => {
       alive = false;
     };
-  }, [scope]);
+  }, []);
 
   if (isLoading && !data) {
     return (
-      <div className="space-y-4">
+      <div className="space-y-3">
         <Skeleton className="h-8 w-56" />
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <Skeleton className="h-20" />
-          <Skeleton className="h-20" />
-          <Skeleton className="h-20" />
-          <Skeleton className="h-20" />
-        </div>
-        <Skeleton className="h-40" />
+        <Skeleton className="h-24" />
+        <Skeleton className="h-24" />
       </div>
     );
   }
@@ -153,10 +138,14 @@ export function CreditCardSection() {
     );
   }
 
-  const t = data.totals;
+  // Cartão com maior fatura primeiro — é o que mais pesa agora.
+  const sortedCards = [...data.cards].sort(
+    (a, b) => parseFloat(b.current_invoice?.total ?? "0") - parseFloat(a.current_invoice?.total ?? "0")
+  );
+  const biggest = sortedCards[0];
 
   return (
-    <section className="space-y-4">
+    <section className="space-y-3">
       <div className="flex items-center justify-between">
         <h3 className="font-display text-xl text-ink dark:text-paper">Cartões de crédito</h3>
         <Link to="/cards" className="text-xs text-emerald hover:underline">
@@ -164,35 +153,24 @@ export function CreditCardSection() {
         </Link>
       </div>
 
-      {/* Números para decisão */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <MiniStat
-          label="Limite disponível"
-          value={formatCurrency(t.available_limit)}
-          hint={`de ${formatCurrency(t.credit_limit)}`}
-        />
-        <MiniStat
-          label="Utilização"
-          value={`${t.utilization_pct.toFixed(0)}%`}
-          hint={`${formatCurrency(t.used_limit)} em uso`}
-        />
-        <MiniStat
-          label="Fatura atual"
-          value={formatCurrency(t.current_invoices_total)}
-          hint={
-            t.spend_change_pct != null
-              ? `${formatPercent(t.spend_change_pct)} vs. mês anterior`
-              : undefined
-          }
-        />
-        <MiniStat
-          label="Comprometido à frente"
-          value={formatCurrency(t.future_committed_total)}
-          hint="parcelas nas próximas faturas"
-        />
-      </div>
+      {data.cards.length > 1 && biggest.current_invoice && (
+        <div className="flex items-center gap-3 rounded-card border border-clay/30 bg-clay/5 p-3">
+          <span className="flex items-center justify-center w-8 h-8 rounded-full bg-clay/15 shrink-0">
+            <Flame size={16} className="text-clay" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs text-olive">Maior fatura entre seus cartões</p>
+            <p className="text-sm font-medium text-ink dark:text-paper truncate">{biggest.name}</p>
+          </div>
+          <div className="text-right shrink-0">
+            <p className="num text-base font-semibold text-ink dark:text-paper">
+              {formatCurrency(biggest.current_invoice.total)}
+            </p>
+            <p className="text-xs text-olive">{biggest.utilization_pct.toFixed(0)}% do limite usado</p>
+          </div>
+        </div>
+      )}
 
-      {/* Insights */}
       {data.insights.length > 0 && (
         <div className="rounded-card border border-paper-border dark:border-ink-border bg-paper-soft dark:bg-ink-soft p-4 shadow-soft space-y-2">
           {data.insights.map((ins, idx) => (
@@ -204,21 +182,10 @@ export function CreditCardSection() {
         </div>
       )}
 
-      {/* Cartões */}
       <div className="grid md:grid-cols-2 gap-3">
-        {data.cards.map((card) => (
-          <CardPanel key={card.id} card={card} />
+        {sortedCards.map((card) => (
+          <CardPanel key={card.id} card={card} isBiggest={data.cards.length > 1 && card.id === biggest.id} />
         ))}
-      </div>
-
-      {/* Segregação por categoria/subcategoria + tendência */}
-      <div className="grid lg:grid-cols-2 gap-4">
-        <CreditCardCategoryTree
-          nodes={data.category_breakdown}
-          scope={data.scope}
-          onScopeChange={setScope}
-        />
-        <CreditCardSpendTrend points={data.trend} />
       </div>
     </section>
   );

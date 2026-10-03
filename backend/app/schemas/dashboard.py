@@ -34,6 +34,7 @@ class CategoryBreakdownItem(BaseModel):
     color: str | None
     total: Decimal
     percentage: float
+    is_uncategorized: bool = False
 
 
 class CategoryBreakdownResponse(BaseModel):

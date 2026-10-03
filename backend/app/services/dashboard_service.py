@@ -136,8 +136,10 @@ def get_cash_flow(db: Session, user_id: str, months: int = 6) -> list[dict]:
 def get_category_breakdown(db: Session, user_id: str) -> list[dict]:
     """Gastos por categoria no mês atual — combina despesas avulsas e o que já
     está na fatura atual do cartão de cada cartão (mesma seleção usada em
-    `current_invoices_total`), senão categorias só existentes no cartão nunca
-    apareceriam aqui."""
+    `current_invoices_total`). Usa LEFT JOIN com Category (não INNER): um
+    lançamento sem categoria ainda soma pro total geral, numa linha "Sem
+    categoria" — senão o total daqui nunca bateria com "Fatura atual"/
+    "Despesas do mês", que não filtram por categoria."""
     today = date.today()
     start, end = _month_bounds(today)
 
@@ -146,7 +148,8 @@ def get_category_breakdown(db: Session, user_id: str) -> list[dict]:
             Category.id, Category.name, Category.color,
             func.coalesce(func.sum(Expense.amount), 0).label("total"),
         )
-        .join(Expense, Expense.category_id == Category.id)
+        .select_from(Expense)
+        .outerjoin(Category, Category.id == Expense.category_id)
         .filter(
             Expense.user_id == user_id,
             Expense.deleted_at.is_(None),
@@ -166,7 +169,7 @@ def get_category_breakdown(db: Session, user_id: str) -> list[dict]:
         )
         .select_from(CreditCardInstallment)
         .join(CreditCardPurchase, CreditCardPurchase.id == CreditCardInstallment.purchase_id)
-        .join(Category, Category.id == CreditCardPurchase.category_id)
+        .outerjoin(Category, Category.id == CreditCardPurchase.category_id)
         .filter(
             CreditCardInstallment.invoice_id.in_(current_ids),
             CreditCardInstallment.status != InstallmentStatus.cancelled,
@@ -177,10 +180,17 @@ def get_category_breakdown(db: Session, user_id: str) -> list[dict]:
         else []
     )
 
-    totals: dict[str, dict] = {}
+    totals: dict[str | None, dict] = {}
     for r in (*expense_rows, *card_rows):
         entry = totals.setdefault(
-            r.id, {"category_id": r.id, "category_name": r.name, "color": r.color, "total": Decimal("0")}
+            r.id,
+            {
+                "category_id": r.id,
+                "category_name": r.name if r.id else "Sem categoria",
+                "color": r.color,
+                "total": Decimal("0"),
+                "is_uncategorized": r.id is None,
+            },
         )
         entry["total"] += Decimal(r.total)
 

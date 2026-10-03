@@ -25,6 +25,7 @@ export interface CategoryBreakdownItem {
   color: string | null;
   total: string;
   percentage: number;
+  is_uncategorized: boolean;
 }
 
 export async function getSummary(): Promise<DashboardSummary> {
