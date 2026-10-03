@@ -1,17 +1,28 @@
 """Migração: garante que cada parcela esteja na fatura certa pela regra de
 fechamento do cartão (ver `app/services/invoice_service.py`: dia >=
 closing_day fica no mês civil da própria data; dia < closing_day cai no
-mês anterior).
+mês anterior) — e que o fechamento/vencimento de cada fatura batam com essa
+regra.
 
-Reclassifica cada PARCELA individualmente pela data real reconstruída da
-compra e pela regra atual de `reference_period_for` — então é seguro rodar
-de novo quantas vezes for preciso (inclusive depois de versões anteriores
-deste script, que usaram regras diferentes/erradas): ele corrige o que
-estiver fora do lugar pela regra VIGENTE no momento em que for rodado e não
-mexe no que já está certo (idempotente — rodar duas vezes seguidas na
-segunda não deveria mover nada).
+Faz duas coisas, nessa ordem, por cartão:
 
-Só mexe em parcelas de faturas que ainda NÃO foram pagas — fatura paga é
+1. Reclassifica cada PARCELA individualmente pela data real reconstruída da
+   compra, movendo-a pra fatura certa quando necessário.
+2. Recalcula fechamento/vencimento de TODA fatura não paga a partir do seu
+   próprio rótulo (reference_month/year) — necessário porque uma fatura
+   criada numa versão antiga do código (antes desta correção, ou de
+   correções anteriores) guarda fechamento/vencimento de quando foi criada;
+   só corrigir o rótulo (passo 1) não atualiza esses dois campos, e uma
+   fatura "reaproveitada" (já existia pro mês certo) nunca passa de novo
+   pelo cálculo de fechamento/vencimento.
+
+Os dois passos são idempotentes — seguro rodar de novo quantas vezes for
+preciso (inclusive depois de versões anteriores deste script, que usaram
+regras diferentes/erradas): cada rodada corrige o que estiver fora do lugar
+pela regra VIGENTE no momento em que for rodado e não mexe no que já está
+certo.
+
+Só mexe em faturas/parcelas que ainda NÃO foram pagas — fatura paga é
 passado imutável (mesma regra usada no resto do sistema). Faturas que
 ficam sem nenhuma parcela depois da reclassificação são removidas.
 
@@ -29,7 +40,7 @@ from app.database import SessionLocal
 from app.models.credit_card import (
     CreditCard, CreditCardInstallment, CreditCardInvoice, CreditCardPurchase, InvoiceStatus,
 )
-from app.services.invoice_service import reference_period_for, resolve_invoice_for_date
+from app.services.invoice_service import closing_and_due_dates, reference_period_for, resolve_invoice_for_date
 
 
 def _safe_day(year: int, month: int, day: int) -> int:
@@ -57,6 +68,7 @@ def run(dry_run: bool = False) -> None:
         cards = db.query(CreditCard).all()
         total_scanned = 0
         total_moved = 0
+        total_dates_fixed = 0
 
         for card in cards:
             installments = (
@@ -112,11 +124,39 @@ def run(dry_run: bool = False) -> None:
                             db.delete(inv)
                 db.flush()
 
+            # Passo 2: fechamento/vencimento de toda fatura não paga tem que
+            # bater com o que a regra atual calcularia pro próprio rótulo
+            # dela — senão fica uma fatura "Setembro" com fechamento de
+            # dezembro, sobra de quando o rótulo dela ainda estava errado.
+            open_invoices = (
+                db.query(CreditCardInvoice)
+                .filter(CreditCardInvoice.credit_card_id == card.id, CreditCardInvoice.status != InvoiceStatus.paid)
+                .all()
+            )
+            for inv in open_invoices:
+                correct_closing, correct_due = closing_and_due_dates(card, inv.reference_month, inv.reference_year)
+                if (inv.closing_date, inv.due_date) == (correct_closing, correct_due):
+                    continue
+                total_dates_fixed += 1
+                print(
+                    f"cartão {card.name!r}: fatura {inv.reference_month:02d}/{inv.reference_year} — "
+                    f"fechamento/vencimento {inv.closing_date}/{inv.due_date} -> {correct_closing}/{correct_due}"
+                )
+                if not dry_run:
+                    inv.closing_date = correct_closing
+                    inv.due_date = correct_due
+
         if dry_run:
-            print(f"\n[dry-run] {total_moved} de {total_scanned} parcela(s) verificada(s) seriam movidas.")
+            print(
+                f"\n[dry-run] {total_moved} de {total_scanned} parcela(s) verificada(s) seriam movidas; "
+                f"{total_dates_fixed} fatura(s) teriam fechamento/vencimento corrigidos."
+            )
         else:
             db.commit()
-            print(f"\n{total_moved} de {total_scanned} parcela(s) verificada(s) foram movidas pra fatura certa.")
+            print(
+                f"\n{total_moved} de {total_scanned} parcela(s) verificada(s) foram movidas pra fatura certa; "
+                f"{total_dates_fixed} fatura(s) tiveram fechamento/vencimento corrigidos."
+            )
     finally:
         db.close()
 

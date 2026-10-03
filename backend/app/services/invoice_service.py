@@ -109,6 +109,31 @@ def current_invoice_ids_for_user(db: Session, user_id: str, today: date) -> list
     return ids
 
 
+def closing_and_due_dates(credit_card: CreditCard, month: int, year: int) -> tuple[date, date]:
+    """(closing_date, due_date) da fatura de referência (month, year) — a
+    fatura fecha no dia `closing_day` do mês SEGUINTE a (month, year), não
+    do próprio mês de referência (ver docstring do módulo). Função pura,
+    sem tocar no banco — usada tanto para criar uma fatura nova quanto para
+    corrigir fechamento/vencimento de uma fatura já existente cujo rótulo
+    mudou (ex: migração de dados), já que esses dois campos dependem só de
+    (month, year, closing_day, due_day), nunca da data da compra em si."""
+    closing_month_date = date(year, month, 1) + relativedelta(months=1)
+    closing_day = _safe_day(closing_month_date.year, closing_month_date.month, credit_card.closing_day)
+    closing_date = date(closing_month_date.year, closing_month_date.month, closing_day)
+
+    due_month_date = closing_month_date
+    due_day = _safe_day(due_month_date.year, due_month_date.month, credit_card.due_day)
+    due_date = date(due_month_date.year, due_month_date.month, due_day)
+    # Se o vencimento cair antes ou no mesmo dia do fechamento (configuração
+    # comum: fecha dia 25, vence dia 5 do mês seguinte), empurra pro mês seguinte.
+    if due_date <= closing_date:
+        due_month_date = due_month_date + relativedelta(months=1)
+        due_day = _safe_day(due_month_date.year, due_month_date.month, credit_card.due_day)
+        due_date = date(due_month_date.year, due_month_date.month, due_day)
+
+    return closing_date, due_date
+
+
 def resolve_invoice_for_date(db: Session, credit_card: CreditCard, reference_date: date) -> CreditCardInvoice:
     month, year = reference_period_for(credit_card, reference_date)
 
@@ -124,22 +149,7 @@ def resolve_invoice_for_date(db: Session, credit_card: CreditCard, reference_dat
     if invoice:
         return invoice
 
-    # A fatura de referência (month, year) fecha no dia closing_day do mês
-    # SEGUINTE — não do próprio mês de referência (ver docstring do módulo).
-    closing_month_date = date(year, month, 1) + relativedelta(months=1)
-    closing_day = _safe_day(closing_month_date.year, closing_month_date.month, credit_card.closing_day)
-    closing_date = date(closing_month_date.year, closing_month_date.month, closing_day)
-
-    due_month_date = closing_month_date
-    due_day = _safe_day(due_month_date.year, due_month_date.month, credit_card.due_day)
-    due_date = date(due_month_date.year, due_month_date.month, due_day)
-    # Se o vencimento cair antes ou no mesmo dia do fechamento (configuração
-    # comum: fecha dia 25, vence dia 5 do mês seguinte), empurra pro mês seguinte.
-    if due_date <= closing_date:
-        due_month_date = due_month_date + relativedelta(months=1)
-        due_day = _safe_day(due_month_date.year, due_month_date.month, credit_card.due_day)
-        due_date = date(due_month_date.year, due_month_date.month, due_day)
-
+    closing_date, due_date = closing_and_due_dates(credit_card, month, year)
     invoice = CreditCardInvoice(
         credit_card_id=credit_card.id,
         reference_month=month,
